@@ -97,8 +97,10 @@ def CG_method(A, b):
         pylab.plot(range(i+1), r_norm, 'ko-')
         #ax = pylab.gca()
         #ax.set_aspect('equal')
+        pylab.rc('text', usetex=True)			# for using latex
+        pylab.rc('font',family='serif')			# setting font
         pylab.xlabel('iteration')
-        pylab.ylabel('||r||')
+        pylab.ylabel(r'$\|r\|$')
         pylab.title('Conjugate Gradient Method')
         pylab.draw()
         time.sleep(.01)
@@ -119,8 +121,8 @@ def CG_method(A, b):
                 print "The problem has not converged." 
                 print "The maximum number of iterations has been reached."
                 print "If the problem appears to be converging, consider \
-                      increasing the maximum number of iterations in line 52 \
-                      of iterative_methods.py"
+                increasing the maximum number of iterations in line 52 \
+                of iterative_methods.py"
             continue
     
     # pylab interactive mode off (this keeps the plot from closing)
@@ -263,8 +265,10 @@ def BCG_method(A, b):
         pylab.plot(range(i+1), r_norm, 'ko-')
         #ax = pylab.gca()
         #ax.set_aspect('equal')
+        pylab.rc('text', usetex=True)			# for using latex
+        pylab.rc('font',family='serif')			# setting font
         pylab.xlabel('iteration')
-        pylab.ylabel('||r||')
+        pylab.ylabel(r'$\|r\|$')
         pylab.title('BiConjugate Gradient Method')
         pylab.draw()
         time.sleep(.01)
@@ -285,8 +289,8 @@ def BCG_method(A, b):
                 print "The problem has not converged." 
                 print "The maximum number of iterations has been reached."
                 print "If the problem appears to be converging, consider \
-                      increasing the maximum number of iterations in line 209 \
-                      of iterative_methods.py"
+                increasing the maximum number of iterations in line 209 \
+                of iterative_methods.py"
             continue
     
     # pylab interactive mode off (this keeps the plot from closing)
