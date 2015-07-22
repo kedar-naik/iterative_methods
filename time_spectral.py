@@ -174,8 +174,8 @@ def fourierInterp(x,y):
     spaced as the original.
     
     Input:
-      - abscissas, x (as a list)
-      - ordinates, y (as a list)
+      - abscissas, x (as a list) (leave out last, duplicate point in period)
+      - ordinates, y (as a list) (again, leave out last point, if periodic)
     Output:
       - new abscissas, x_int (as a list)
       - interpolated ordinates, y_int (as a list)
@@ -211,13 +211,9 @@ def fourierInterp(x,y):
             scaled_x = (2*math.pi/period)*(x[i]-x[0])
             a[j] += (2.0/n)*math.cos(j*scaled_x)*y[i]
             b[j] += (2.0/n)*math.sin(j*scaled_x)*y[i]
-        print "j = ",j
-        print "a[j] = ",a[j]
-        print "b[j] = ",b[j]
     
     # find the actual interpolation
     n_int = refine_fac*(n+1)
-    
     x_int = myLinspace(x[0],x[-1]+x_interval,n_int)
     y_int = [0.0]*n_int
     dydx_int = [0.0]*n_int
@@ -228,18 +224,38 @@ def fourierInterp(x,y):
         for j in range(m):
             y_int[i] += a[j+1]*math.cos((j+1)*scaled_x_int) + \
                         b[j+1]*math.sin((j+1)*scaled_x_int)
-            dydx_int[i] += (j+1)*(b[j+1]*math.cos((j+1)*scaled_x_int) - \
-                        a[j+1]*math.sin((j+1)*scaled_x_int))
+            #check this            
+            #dydx_int[i] += (j+1)*(b[j+1]*math.cos((j+1)*scaled_x_int) - \
+            #            a[j+1]*math.sin((j+1)*scaled_x_int))
     
     return (x_int, y_int)
-
+    
+# this functions returns the l2-norm of a given list ##########################
+def myNorm(x):
+    """
+    This function returns the l2-norm of a given list of numbers.
+    
+    Input:
+      - vector, x (as a list) 
+    Output:
+      - l2-norm, norm
+    """
+    
+    import math
+    
+    abs_sq = [abs(float(entry))**2 for entry in x]
+    norm = math.sqrt(sum(abs_sq))
+    
+    return norm
+    
 # main ########################################################################
 def main():
     import math
+    import time
     from matplotlib import pylab as plt
 
     # user inputs
-    N = 5                  # number of time instaces
+    N = 7                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
     T=1.0
     
@@ -280,9 +296,9 @@ def main():
     plt. hold('on')
     plt.plot(t_fine,dfdt_fine,'r-',label='df/dt')
     plt.plot(t,f_TS,'ko',label='f_{TS}')
-    plt.plot(t,dfdt_TS,'ro',label='df/dt_{TS}')
+    plt.plot(t,dfdt_TS,'go',label='df/dt_{TS}')
     plt.plot(t_int,dfdt_TS_int,'g--',label='Fourier Interp.')
-    plt.xlabel('t')
+    plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel('')
     plt.legend(loc='lower right')
     plt.title(r'$N = \,$'+str(N))
@@ -304,38 +320,93 @@ def main():
             f.append(initial_value)
         else:
             f.append(f[n-1] + delta_t*myPeriodicODE(times[n-1],T,f[n-1]))
-          
+    
     plt.rc('text', usetex=True)            # for using latex
     plt.rc('font',family='serif')            # setting font
     plt.figure()
     plt.plot(times,f,'k-',label='f')
-    plt.xlabel('t')
-    plt.ylabel('f')
+    plt.xlabel('$t$', fontsize=18)
+    plt.ylabel('$f$', fontsize=18)
     plt.title(r'$\Delta t = \,$'+str(delta_t))
     
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
-    delta_tau = 0.001           # pseudo-timestep
-    init_value = 0.0            # constant intital guess
-    max_pseudosteps = 3000      # maximum number of pseudo-timesteps to try
-          
+    delta_tau = 0.001            # pseudo-timestep
+    init_value = 5.0             # constant intital guess
+    max_pseudosteps = 50000      # maximum number of pseudo-timesteps to try
+    conv_criteria = 1e-4         # resdiual convergence criteria
+    
+    # Initialize history lists
+    res_hist = []                # residual history
+    f_TS_hist =[]                # solution history
+    
+    # set the intial guess for the periodic solution
     f_TS = [init_value for index in indices]    # N.B. f_TS is being reassigned
+    f_TS_hist.append(f_TS)   
     
-    # print the intial guess 
-    print f_TS
-    
-    # plot the intial guess
-  
+    # pseudo-timestepping
     for iteration in range(max_pseudosteps):
-        
+                
         # compute D*f
         Df = myMult(D,f_TS)
         
         # compute dfdt from the ODE
-        #dfdt = 
-      
-        f_TS = f_TS
+        dfdt = [myPeriodicODE(t[index],T,f_TS[index]) for index in indices]
+        
+        # compute the residual vector for this solution
+        res = [-Df[index]+dfdt[index] for index in indices]
+        
+        # find the norm of the residual vector and store it
+        res_hist.append(myNorm(res))
+        
+        # print new residual to the screen
+        print iteration, ":", res_hist[iteration]
+        
+        # check residual stopping condition
+        if res_hist[iteration] < conv_criteria:
+            print "\n solution found.", iteration, " iterations required." 
+            break
+        
+        # update solution vector
+        f_TS = [f_TS[index]+delta_tau*res[index] for index in indices]
+                
+        # store new solution for plotting
+        f_TS_hist.append(f_TS)
+    
+    # plot of the final solution
+    plt.rc('text', usetex=True)              # for using latex
+    plt.rc('font',family='serif')            # setting font
+    plt.figure()
+    plt.plot(t,f_TS_hist[-1],'ko')
+    t_int,f_TS_int = fourierInterp(t,f_TS_hist[-1])      
+    plt.plot(t_int,f_TS_int,'k--')
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f\left(t\right)$', fontsize=18)
+    plt.title(r'iteration \#'+str(iteration)+', (started from uniform solution at '+str(init_value)+')')
+    
+    # plot of the residual history
+    plt.figure()
+    plt.semilogy(range(iteration+1),res_hist,'b-')
+    plt.xlabel(r'$iteration$', fontsize=18)
+    plt.ylabel(r'$\|R\|$', fontsize=18)
+    plt.title(r'$\Delta\tau = \,$'+str(delta_tau)+', converged at $\|R\|$ = '+str(conv_criteria))
+    '''
+    # for plotting
+    plt.ion()                         # turn on interactive mode first
+    plt.figure()
+    plt.rc('text', usetex=True)            # for using latex
+    plt.rc('font',family='serif')            # setting font
+    for run in range(max_pseudosteps+1):
+        t_int,f_TS_int = fourierInterp(t,f_TS_hist[run])
+        plt.plot(t,f_TS_hist[run],'ko-')        
+        #plt.plot(t_int,f_TS_int,'k-')
+        plt.title(r'$i = \,$'+str(run))
+        plt.draw()
+        time.sleep(.001)
+    plt.ioff()                        # turn off interactive mode
+    plt.show()
+    '''
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
