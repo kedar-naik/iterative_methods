@@ -94,7 +94,7 @@ def CG_method(A, b):
               % (r_norm[i], orders_fallen)
         
         # plot the convergence to the screen
-        pylab.plot(range(i+1), r_norm, 'ko-')
+        pylab.semilogy(range(i+1), r_norm, 'ko-')
         #ax = pylab.gca()
         #ax.set_aspect('equal')
         pylab.rc('text', usetex=True)			# for using latex
@@ -262,7 +262,7 @@ def BCG_method(A, b):
               % (r_norm[i], orders_fallen)
         
         # plot the convergence to the screen
-        pylab.plot(range(i+1), r_norm, 'ko-')
+        pylab.semilogy(range(i+1), r_norm, 'ko-')
         #ax = pylab.gca()
         #ax.set_aspect('equal')
         pylab.rc('text', usetex=True)			# for using latex

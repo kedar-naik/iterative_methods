@@ -56,11 +56,12 @@ def myPeriodicSignal(t,T):
       - period of oscillation, T
     Output:
       - discrete signal samples, f
-      - discrete signal derivatices, df/dt
+      - discrete signal derivative, df/dt
+      - discrete signal second derivative, df2dt2
     """
     import math
   
-    # Type in your function here:
+    # Type in your analytical function and dervatives here:
     #f = [pow(math.sin(2*math.pi*t_i/T),3)+pow(math.cos(2*math.pi*t_i/T),3) + 9 \
      #    for t_i in t]
     #dfdt = [(-1/T)*(3*math.pi*math.sin(4*math.pi*t_i/T)* \
@@ -69,16 +70,18 @@ def myPeriodicSignal(t,T):
     f = [math.sin(2*math.pi*t_i/T)+9 for t_i in t]
     dfdt = [(2*math.pi/T)*math.cos(2*math.pi*t_i/T) for t_i in t]
     
-    f = [math.cos(2*math.pi*t_i/T)+9 for t_i in t]
+    f = [math.cos(2*math.pi*t_i/T) for t_i in t]
     dfdt = [(-2*math.pi/T)*math.sin(2*math.pi*t_i/T) for t_i in t]
-  
-    return (f, dfdt)
+    df2dt2 = [-pow(2*math.pi/T,2)*math.cos(2*math.pi*t_i/T) for t_i in t]
+    
+    return (f, dfdt, df2dt2)
   
   
 # this function returns the value of a user-defined 1st-order ODE ############
 def myPeriodicODE(t,T,u):
     """
-    Samples the RHS of an ODE in the form of du/dt = f(u) where f(u) is periodic.
+    Samples the RHS of an ODE of the form du/dt = f(u,t), where f(u,t) is 
+    periodic with period T.
     
     Input:
       - time, t
@@ -251,9 +254,15 @@ def myNorm(x):
 # main ########################################################################
 def main():
     import math
-    import time
-    from matplotlib import pylab as plt
+    import matplotlib                        # import by iteslf first
+    matplotlib.use('Agg')                    # use Anti-Grain Geometry backend
+    from matplotlib import pylab as plt      # must be called AFTER use()
+    from matplotlib import animation         # for specifying the writer
 
+    # plotting preliminaries
+    plt.close('all')
+    writer = animation.writers['ffmpeg'](fps=15)
+    
     # user inputs
     N = 7                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
@@ -276,39 +285,53 @@ def main():
     ###########################################################################
     
     # sampling at the time instances
-    f_TS, dfdt = myPeriodicSignal(t,T)
+    f_TS, dummy1, dummy2 = myPeriodicSignal(t,T)
     
-    # the time derivative at the time instances using time-spectral operator
+    # the time derivatives at the time instances using time-spectral operator
     dfdt_TS = myMult(D, f_TS)
+    
+    # find the second derviative using the time-spectral operator as well
+    df2dt2_TS = myMult(D, dfdt_TS)
     
     # interpolate the time-spectral results with Fourier series
     t_int, dfdt_TS_int = fourierInterp(t, dfdt_TS)
+    t_int, df2dt2_TS_int = fourierInterp(t, df2dt2_TS)
     
     # fine time grid (10 times the number of time instances) for "exact" values
     t_fine = [T*index/(10*N-1) for index in range(10*N)]
-    f_fine, dfdt_fine = myPeriodicSignal(t_fine,T)
+    f_fine, dfdt_fine, df2dt2_fine = myPeriodicSignal(t_fine,T)
     
-    # generate plot
-    plt.rc('text', usetex=True)            # for using latex
-    plt.rc('font',family='serif')            # setting font
-    plt.close("all")
-    plt.plot(t_fine,f_fine,'k-',label='f')
-    plt. hold('on')
-    plt.plot(t_fine,dfdt_fine,'r-',label='df/dt')
-    plt.plot(t,f_TS,'ko',label='f_{TS}')
-    plt.plot(t,dfdt_TS,'go',label='df/dt_{TS}')
-    plt.plot(t_int,dfdt_TS_int,'g--',label='Fourier Interp.')
+    # plotting
+    print 'plotting fig1...'
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    # plot the "exact" results
+    plt.plot(t_fine,f_fine,'k-',label='$f$')
+    plt.plot(t_fine,dfdt_fine,'r-',label='$df/dt$')
+    plt.plot(t_fine,df2dt2_fine,'b-',label='$d^2f/dt^2$')
+    # plot the time instances
+    plt.plot(t,f_TS,'ko',label='$f_{TS}$')
+    # plot the time-spectral first dervative and interpolation
+    plt.plot(t,dfdt_TS,'go',label='$df_{TS}/dt')
+    plt.plot(t_int,dfdt_TS_int,'g--',label='$(Fourier Interp.)$')
+    # plot the time-spectral second dervative and interpolation
+    plt.plot(t,df2dt2_TS,'yo',label='$d^2f_{TS}/dt^2')
+    plt.plot(t_int,df2dt2_TS_int,'y--',label='$(Fourier Interp.)$')
+    # limits, labels, legend, title
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel('')
-    plt.legend(loc='lower right')
+    plt.legend(loc='best', ncol=2)
     plt.title(r'$N = \,$'+str(N))
+    # save figure
+    plt.savefig('TS_verification', dpi=1000)
+    print 'fig1 saved'
     
     ###########################################################################
     # [time accurate] explicit euler ##########################################
     ###########################################################################
-    delta_t = 0.005
+    delta_t = 0.1
     initial_value = 8
-    t_end = 25
+    t_end = 20
   
     f = []
     times = []
@@ -321,13 +344,32 @@ def main():
         else:
             f.append(f[n-1] + delta_t*myPeriodicODE(times[n-1],T,f[n-1]))
     
-    plt.rc('text', usetex=True)            # for using latex
-    plt.rc('font',family='serif')            # setting font
-    plt.figure()
-    plt.plot(times,f,'k-',label='f')
-    plt.xlabel('$t$', fontsize=18)
-    plt.ylabel('$f$', fontsize=18)
+    
+    fig = plt.figure()
+    l, = plt.plot([], [],'k-',label='f')
+
+    # things that will not be changing insdie the loop
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f(t)$', fontsize=18)
+    plt.xlim(0,20)
+    plt.ylim(7.8,9.0)
     plt.title(r'$\Delta t = \,$'+str(delta_t))
+    
+    with writer.saving(fig, 'time_accurate.mp4', 100):
+        for n in range(time_points):
+            l.set_data(times[:n+1],f[:n+1])
+            #plt.legend(loc='best')
+            writer.grab_frame()
+            # progress monitor
+            print 'capturing fig2: ', float(n)*100.0/(time_points-1), '%'
+        writer.grab_frame()
+    
+    # save an image of the final frame
+    print 'saving final image...'
+    plt.savefig('time_accurate', dpi=1000)
+    print 'fig2 saved'
     
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
@@ -391,22 +433,7 @@ def main():
     plt.xlabel(r'$iteration$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
     plt.title(r'$\Delta\tau = \,$'+str(delta_tau)+', converged at $\|R\|$ = '+str(conv_criteria))
-    '''
-    # for plotting
-    plt.ion()                         # turn on interactive mode first
-    plt.figure()
-    plt.rc('text', usetex=True)            # for using latex
-    plt.rc('font',family='serif')            # setting font
-    for run in range(max_pseudosteps+1):
-        t_int,f_TS_int = fourierInterp(t,f_TS_hist[run])
-        plt.plot(t,f_TS_hist[run],'ko-')        
-        #plt.plot(t_int,f_TS_int,'k-')
-        plt.title(r'$i = \,$'+str(run))
-        plt.draw()
-        time.sleep(.001)
-    plt.ioff()                        # turn off interactive mode
-    plt.show()
-    '''
+
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
