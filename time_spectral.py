@@ -300,7 +300,7 @@ def main():
     # fine time grid (10 times the number of time instances) for "exact" values
     t_fine = [T*index/(10*N-1) for index in range(10*N)]
     f_fine, dfdt_fine, df2dt2_fine = myPeriodicSignal(t_fine,T)
-    
+    '''
     # plotting
     print 'plotting fig1...'
     plt.rc('text', usetex=True)               # for using latex
@@ -325,30 +325,33 @@ def main():
     # save figure
     plt.savefig('TS_verification', dpi=1000)
     print 'fig1 saved'
-    
+    '''
     ###########################################################################
     # [time accurate] explicit euler ##########################################
     ###########################################################################
-    delta_t = 0.1
-    initial_value = 8
-    t_end = 20
+    delta_t = 0.1            # time step
+    initial_value = 8        # intitial condition
+    t_end = 20               # final time
   
     f = []
     times = []
     time_points = int((t_end/delta_t)+1)
     
+    # time stepping
     for n in range(time_points):
         times.append(n*delta_t)
         if n == 0:
+            # record the initial condition
             f.append(initial_value)
         else:
+            # explicitly step forward in time 
             f.append(f[n-1] + delta_t*myPeriodicODE(times[n-1],T,f[n-1]))
-    
-    
+    '''
+    # plotting: initializations
     fig = plt.figure()
     l, = plt.plot([], [],'k-',label='f')
 
-    # things that will not be changing insdie the loop
+    # plotting: things that will not be changing inside the loop
     plt.rc('text', usetex=True)               # for using latex
     plt.rc('font', family='serif')            # setting font
     plt.xlabel(r'$t$', fontsize=18)
@@ -357,6 +360,7 @@ def main():
     plt.ylim(7.8,9.0)
     plt.title(r'$\Delta t = \,$'+str(delta_t))
     
+    # plotting: capturing the movie
     with writer.saving(fig, 'time_accurate.mp4', 100):
         for n in range(time_points):
             l.set_data(times[:n+1],f[:n+1])
@@ -366,11 +370,11 @@ def main():
             print 'capturing fig2: ', float(n)*100.0/(time_points-1), '%'
         writer.grab_frame()
     
-    # save an image of the final frame
+    # plotting: save an image of the final frame
     print 'saving final image...'
     plt.savefig('time_accurate', dpi=1000)
     print 'fig2 saved'
-    
+    '''
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
@@ -403,11 +407,12 @@ def main():
         res_hist.append(myNorm(res))
         
         # print new residual to the screen
-        print iteration, ":", res_hist[iteration]
+        print '''pseudo-time iteration #',iteration,
+              '; residual = ',res_hist[iteration]'''
         
         # check residual stopping condition
         if res_hist[iteration] < conv_criteria:
-            print "\n solution found.", iteration, " iterations required." 
+            print "\nsolution found.", iteration, " iterations required.\n" 
             break
         
         # update solution vector
@@ -416,24 +421,53 @@ def main():
         # store new solution for plotting
         f_TS_hist.append(f_TS)
     
-    # plot of the final solution
-    plt.rc('text', usetex=True)              # for using latex
-    plt.rc('font',family='serif')            # setting font
-    plt.figure()
-    plt.plot(t,f_TS_hist[-1],'ko')
-    t_int,f_TS_int = fourierInterp(t,f_TS_hist[-1])      
-    plt.plot(t_int,f_TS_int,'k--')
+    # plotting: initializations and sizing
+    fig = plt.figure()
+    xdim, ydim = plt.gcf().get_size_inches()
+    plt.gcf().set_size_inches(2*xdim, ydim, forward=True)
+
+    # plotting: things that will not be changing inside the loop
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    plt.subplot(1,2,1)
+    dots, = plt.plot([], [],'ko',label='$f_{TS}$')
+    line, = plt.plot([], [],'k--',label='$ Fourier interp.$')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f\left(t\right)$', fontsize=18)
-    plt.title(r'iteration \#'+str(iteration)+', (started from uniform solution at '+str(init_value)+')')
-    
-    # plot of the residual history
-    plt.figure()
-    plt.semilogy(range(iteration+1),res_hist,'b-')
+    plt.xlim(0,1)
+    plt.ylim(5,9)
+    plt.subplot(1,2,2)
+    res, = plt.semilogy([], [],'b-',label='residual')
     plt.xlabel(r'$iteration$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
-    plt.title(r'$\Delta\tau = \,$'+str(delta_tau)+', converged at $\|R\|$ = '+str(conv_criteria))
+    plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
+    plt.xlim(0,30000)
+    plt.ylim(1e-5,10)
+    
+    # plotting: capturing the movie
+    with writer.saving(fig, 'time_spectral_ex.mp4', 100):
+        n_images = iteration+1
+        skip_images = 250
+        for n in range(0,n_images,skip_images):
+            # plot solution and interpolation
+            plt.subplot(1,2,1)
+            dots.set_data(t,f_TS_hist[n])
+            t_int,f_TS_int = fourierInterp(t,f_TS_hist[n])
+            line.set_data(t_int,f_TS_int)
+            plt.title(r'$iteration \,\#$'+'$'+str(n)+'$')
+            plt.legend(loc='best')
+            # plot residual            
+            plt.subplot(1,2,2)
+            res.set_data(range(n),res_hist[:n])
+            writer.grab_frame()
+            # progress monitor
+            print 'capturing fig3: ', float(n)*100.0/(n_images-1), '%'
+        writer.grab_frame()
 
+    # plotting: save an image of the final frame
+    print 'saving final image...'
+    plt.savefig('TS_explicit', dpi=1000)
+    print 'figure saved: explicit TS time-stepping'
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':

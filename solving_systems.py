@@ -12,7 +12,8 @@ pylab.close("all")
 
 # The system
 A = [[1, -1, 0], \
-[-1.5, 1, -1], [0, -1, 1]]
+   [-1.5, 1, -1], \
+     [0, -1, 1]]
 b = [32, 71, -42]
 
 # Using the Conjugate Gradient method
