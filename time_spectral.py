@@ -99,6 +99,7 @@ def myPeriodicODE(t,T,u):
     b = 2*math.pi/T           # b = 2*pi/period of the sinusoidal function
     
     dudt = k*u*(1-(u/N)) - h*(1+math.sin(b*t))
+    dudt = k*u*(1-(u/N)) - h*(1+math.sin(b*t)*math.cos(b*t)**4)
     
     return dudt
   
@@ -155,16 +156,6 @@ def myLinspace(start,end,n):
         "\n The list of points is empty! Something has gone wrong..."
     else:
         return points
-    
-# this function extracts the period of steady-state oscillations ##############
-#def extractPeriod(t,f):
-#    """
-#    Given a time-accurate solution, this function will 
-#    -interpolate the given points with a Fourier series
-#    -use the derivative of to figure out how far apart in time the peaks and 
-#     valleys of the periodic oscillation are
-#    -produce an average (RMS?)
-#    """
     
 # this function interpolates a series of points with a Fourier series #########
 def fourierInterp(x,y):
@@ -227,11 +218,51 @@ def fourierInterp(x,y):
         for j in range(m):
             y_int[i] += a[j+1]*math.cos((j+1)*scaled_x_int) + \
                         b[j+1]*math.sin((j+1)*scaled_x_int)
-            #check this            
-            #dydx_int[i] += (j+1)*(b[j+1]*math.cos((j+1)*scaled_x_int) - \
-            #            a[j+1]*math.sin((j+1)*scaled_x_int))
+            dydx_int[i] += (2*math.pi/period)*(j+1)* \
+                           (b[j+1]*math.cos((j+1)*scaled_x_int) - \
+                            a[j+1]*math.sin((j+1)*scaled_x_int))
     
-    return (x_int, y_int)
+    return (x_int, y_int, dydx_int)
+    
+# this function extracts the period of steady-state oscillations ##############
+def extractPeriod(t,f):
+    """
+    Given a time-accurate solution, this function will 
+    -interpolate the last third of a given time history with a Fourier series
+    -use the derivative of the interpolant to find local maxima and minima
+    -for the highest set of local maxima found, compute peak-to-peak time
+    
+    Input:
+      - time samples, t (as a list)
+      - function values, f (as a list)
+    Output:
+      - period, T
+      - time samples over a period, t_period (as a list)
+      - function values over a period, f_period (as a list)
+    """
+    from matplotlib import pylab as plt
+    
+    # length of the time history
+    n = len(t)
+    
+    # assume that steady-state behavior appears ~2/3 of the way in
+    # N.B. n and 3 are ints, so floor() or ceil() are not needed.
+    t_end = t[-n/3:]
+    f_end = f[-n/3:]
+    
+    # interpolate these points using a Fouier series
+    t_end_int, f_end_int, dummy = fourierInterp(t_end, f_end)
+    
+    plt.figure()
+    plt.plot(t_end,f_end,'k*')
+    plt.plot(t_end_int,f_end_int,'k.')
+    
+    # since the above Fourier interpolation function assumes perfect 
+    # periodicity of the points given to it, the fit will likely be quite
+    # inaccurate at the ends.
+    
+    return
+    
     
 # this functions returns the l2-norm of a given list ##########################
 def myNorm(x):
@@ -254,17 +285,16 @@ def myNorm(x):
 # main ########################################################################
 def main():
     import math
-    import matplotlib                        # import by iteslf first
+    import matplotlib                        # import by itself first
     matplotlib.use('Agg')                    # use Anti-Grain Geometry backend
     from matplotlib import pylab as plt      # must be called AFTER use()
     from matplotlib import animation         # for specifying the writer
 
-    # plotting preliminaries
+    # close open windows
     plt.close('all')
-    writer = animation.writers['ffmpeg'](fps=15)
-    
+        
     # user inputs
-    N = 7                  # number of time instaces
+    N = 17                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
     T=1.0
     
@@ -294,42 +324,48 @@ def main():
     df2dt2_TS = myMult(D, dfdt_TS)
     
     # interpolate the time-spectral results with Fourier series
-    t_int, dfdt_TS_int = fourierInterp(t, dfdt_TS)
-    t_int, df2dt2_TS_int = fourierInterp(t, df2dt2_TS)
+    t_int, dfdt_TS_int, dummy1 = fourierInterp(t, dfdt_TS)
+    t_int, df2dt2_TS_int, dummy1 = fourierInterp(t, df2dt2_TS)
     
     # fine time grid (10 times the number of time instances) for "exact" values
     t_fine = [T*index/(10*N-1) for index in range(10*N)]
     f_fine, dfdt_fine, df2dt2_fine = myPeriodicSignal(t_fine,T)
-    '''
-    # plotting
-    print 'plotting fig1...'
-    plt.rc('text', usetex=True)               # for using latex
-    plt.rc('font', family='serif')            # setting font
-    # plot the "exact" results
-    plt.plot(t_fine,f_fine,'k-',label='$f$')
-    plt.plot(t_fine,dfdt_fine,'r-',label='$df/dt$')
-    plt.plot(t_fine,df2dt2_fine,'b-',label='$d^2f/dt^2$')
-    # plot the time instances
-    plt.plot(t,f_TS,'ko',label='$f_{TS}$')
-    # plot the time-spectral first dervative and interpolation
-    plt.plot(t,dfdt_TS,'go',label='$df_{TS}/dt')
-    plt.plot(t_int,dfdt_TS_int,'g--',label='$(Fourier Interp.)$')
-    # plot the time-spectral second dervative and interpolation
-    plt.plot(t,df2dt2_TS,'yo',label='$d^2f_{TS}/dt^2')
-    plt.plot(t_int,df2dt2_TS_int,'y--',label='$(Fourier Interp.)$')
-    # limits, labels, legend, title
-    plt.xlabel(r'$t$', fontsize=18)
-    plt.ylabel('')
-    plt.legend(loc='best', ncol=2)
-    plt.title(r'$N = \,$'+str(N))
-    # save figure
-    plt.savefig('TS_verification', dpi=1000)
-    print 'fig1 saved'
-    '''
+    
+    # plotting: USER INPUT. Would you like to plot this verification figure?\
+    plot_figure = True
+    plot_name = 'TS verification'
+    
+    if plot_figure == True:
+        # plotting
+        print '\nplotting fig. ' + plot_name + '...'
+        plt.rc('text', usetex=True)               # for using latex
+        plt.rc('font', family='serif')            # setting font
+        # plot the "exact" results
+        plt.plot(t_fine,f_fine,'k-',label='$f$')
+        plt.plot(t_fine,dfdt_fine,'r-',label='$df/dt$')
+        plt.plot(t_fine,df2dt2_fine,'b-',label='$d^2f/dt^2$')
+        # plot the time instances
+        plt.plot(t,f_TS,'ko',label='$f_{TS}$')
+        # plot the time-spectral first dervative and interpolation
+        plt.plot(t,dfdt_TS,'go',label='$df_{TS}/dt')
+        plt.plot(t_int,dfdt_TS_int,'g--',label='$(Fourier \, Interp.)$')
+        # plot the time-spectral second dervative and interpolation
+        plt.plot(t,df2dt2_TS,'yo',label='$d^2f_{TS}/dt^2')
+        plt.plot(t_int,df2dt2_TS_int,'y--',label='$(Fourier \, Interp.)$')
+        # limits, labels, legend, title
+        plt.xlabel(r'$t$', fontsize=18)
+        plt.ylabel('')
+        plt.legend(loc='best', ncol=2)
+        plt.title(r'$N = \,$'+str(N))
+        # save figure
+        print 'saving fig. ' + plot_name + '...'
+        plt.savefig(plot_name, dpi=1000)
+        print 'fig.' + plot_name + ' saved'
+    
     ###########################################################################
     # [time accurate] explicit euler ##########################################
     ###########################################################################
-    delta_t = 0.1            # time step
+    delta_t = 0.05            # time step
     initial_value = 8        # intitial condition
     t_end = 20               # final time
   
@@ -346,7 +382,14 @@ def main():
         else:
             # explicitly step forward in time 
             f.append(f[n-1] + delta_t*myPeriodicODE(times[n-1],T,f[n-1]))
-    '''
+            
+    # plotting: USER INPUTS! do you want to animate the solution history or just
+    # plot the final result? (True = animate, False = just print final result)
+    animate_plot = True                     
+    plot_name = 'time-accurate ODE'
+    n_images = time_points            # total number of images computed
+    skip_images = 1                   # images to skip between animation frames
+    
     # plotting: initializations
     fig = plt.figure()
     l, = plt.plot([], [],'k-',label='f')
@@ -360,27 +403,52 @@ def main():
     plt.ylim(7.8,9.0)
     plt.title(r'$\Delta t = \,$'+str(delta_t))
     
+    # plotting: set the total number of frames
+    if animate_plot == True:
+        # capture all frames (skipping, if necessary) and the final frame
+        all_frames = range(0,n_images,skip_images+1)+[n_images-1]
+    else:
+        # no animation: just capture the last one
+        all_frames = [n_images-1]
+    
     # plotting: capturing the movie
-    with writer.saving(fig, 'time_accurate.mp4', 100):
-        for n in range(time_points):
+    writer = animation.writers['ffmpeg'](fps=15)
+    with writer.saving(fig, plot_name+'.mp4', 100):
+        frame = 0
+        for n in all_frames:
             l.set_data(times[:n+1],f[:n+1])
-            #plt.legend(loc='best')
-            writer.grab_frame()
             # progress monitor
-            print 'capturing fig2: ', float(n)*100.0/(time_points-1), '%'
+            percent_done = float(n)*100.0/(n_images-1)
+            print 'capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                   percent_done,'%'
+            writer.grab_frame()
+            frame += 1
         writer.grab_frame()
     
     # plotting: save an image of the final frame
     print 'saving final image...'
-    plt.savefig('time_accurate', dpi=1000)
-    print 'fig2 saved'
-    '''
+    plt.savefig(plot_name, dpi=1000)
+    print 'figure saved: ' + plot_name
+    
+    ###########################################################################
+    # [time accurate] extract period from time-marching solution###############
+    ###########################################################################
+    plt.figure()
+    plt.plot(times,f,'k-')
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f(t)$', fontsize=18)
+    
+    extractPeriod(times,f)
+    
+    
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
-    delta_tau = 0.001            # pseudo-timestep
-    init_value = 5.0             # constant intital guess
-    max_pseudosteps = 50000      # maximum number of pseudo-timesteps to try
+    delta_tau = 0.0001            # pseudo-timestep
+    init_value = 8.0             # constant intital guess
+    max_pseudosteps = 500000      # maximum number of pseudo-timesteps to try
     conv_criteria = 1e-4         # resdiual convergence criteria
     
     # Initialize history lists
@@ -407,8 +475,8 @@ def main():
         res_hist.append(myNorm(res))
         
         # print new residual to the screen
-        print '''pseudo-time iteration #',iteration,
-              '; residual = ',res_hist[iteration]'''
+        print 'pseudo-time iteration #',iteration, \
+              '; residual = ',res_hist[iteration]
         
         # check residual stopping condition
         if res_hist[iteration] < conv_criteria:
@@ -421,6 +489,13 @@ def main():
         # store new solution for plotting
         f_TS_hist.append(f_TS)
     
+    # plotting: user input! do you want to animate the solution history or just
+    # plot the final result? (True = animate, False = just print final result)
+    animate_plot = True                     
+    plot_name = 'TS explicit pseudo'
+    n_images = iteration+1
+    skip_images = 5000
+    
     # plotting: initializations and sizing
     fig = plt.figure()
     xdim, ydim = plt.gcf().get_size_inches()
@@ -429,45 +504,71 @@ def main():
     # plotting: things that will not be changing inside the loop
     plt.rc('text', usetex=True)               # for using latex
     plt.rc('font', family='serif')            # setting font
+    # solution history plot
     plt.subplot(1,2,1)
     dots, = plt.plot([], [],'ko',label='$f_{TS}$')
-    line, = plt.plot([], [],'k--',label='$ Fourier interp.$')
+    line, = plt.plot([], [],'k--',label='$ Fourier \, interp.$')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f\left(t\right)$', fontsize=18)
-    plt.xlim(0,1)
-    plt.ylim(5,9)
+    ave_init_value = sum(f_TS_hist[0])/N
+    max_final = max(f_TS_hist[-1])
+    min_final = min(f_TS_hist[-1])
+    ampl_final = abs(max_final-min_final)
+    white_space = ampl_final/3.0
+    plt.xlim(0,T)
+    if animate_plot == True:
+        plt.ylim(ave_init_value, max_final+white_space)
+    else:
+        plt.ylim(min_final-white_space,max_final+white_space)
+    # residual history plot
     plt.subplot(1,2,2)
     res, = plt.semilogy([], [],'b-',label='residual')
     plt.xlabel(r'$iteration$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
     plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
-    plt.xlim(0,30000)
+    plt.xlim(0,iteration)
     plt.ylim(1e-5,10)
     
+    # plotting: set the total number of frames
+    if animate_plot == True:
+        # capture all frames (skipping, if necessary) and the final frame
+        all_frames = range(0,n_images,skip_images+1)+[n_images-1]
+    else:
+        # no animation: just capture the last one
+        all_frames = [n_images-1]
+        
     # plotting: capturing the movie
-    with writer.saving(fig, 'time_spectral_ex.mp4', 100):
-        n_images = iteration+1
-        skip_images = 250
-        for n in range(0,n_images,skip_images):
+    writer = animation.writers['ffmpeg'](fps=10)
+    with writer.saving(fig, plot_name+'.mp4', 100):
+        frame = 0
+        for n in all_frames:
             # plot solution and interpolation
             plt.subplot(1,2,1)
             dots.set_data(t,f_TS_hist[n])
-            t_int,f_TS_int = fourierInterp(t,f_TS_hist[n])
+            t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[n])
             line.set_data(t_int,f_TS_int)
             plt.title(r'$iteration \,\#$'+'$'+str(n)+'$')
             plt.legend(loc='best')
             # plot residual            
             plt.subplot(1,2,2)
             res.set_data(range(n),res_hist[:n])
-            writer.grab_frame()
             # progress monitor
-            print 'capturing fig3: ', float(n)*100.0/(n_images-1), '%'
+            frame += 1
+            percent_done = float(n)*100.0/(n_images-1)
+            print 'capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                   percent_done,'%'
+            writer.grab_frame()
         writer.grab_frame()
-
+        
+    # plotting: rescale the final frame to focus on the converged solution
+    if animate_plot == True:
+        plt.subplot(1,2,1)
+        plt.ylim(min_final-white_space,max_final+white_space)
+    
     # plotting: save an image of the final frame
     print 'saving final image...'
-    plt.savefig('TS_explicit', dpi=1000)
-    print 'figure saved: explicit TS time-stepping'
+    plt.savefig(plot_name, dpi=1000)
+    print 'figure saved: ' + plot_name
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
