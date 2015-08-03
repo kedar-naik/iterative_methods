@@ -165,7 +165,9 @@ def fourierInterp(x,y):
     Fourier series. The function returns a Fourier interpolation (of the 
     highest degree trig polynomial allowed by the Nyquist Criterion) along with 
     the corresponding new set of abscissas, which are ten times as finely 
-    spaced as the original.
+    spaced as the original. The first derivative of the interpolant is also 
+    returned. Note that the interpolants will only be exact if the given points
+    are just one shy of representing an exact period
     
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
@@ -173,6 +175,7 @@ def fourierInterp(x,y):
     Output:
       - new abscissas, x_int (as a list)
       - interpolated ordinates, y_int (as a list)
+      - derivative of the interpolant, dydx_int (as a list)
     """
     
     import math
@@ -227,10 +230,15 @@ def fourierInterp(x,y):
 # this function extracts the period of steady-state oscillations ##############
 def extractPeriod(t,f):
     """
-    Given a time-accurate solution, this function will 
-    -interpolate the last third of a given time history with a Fourier series
-    -use the derivative of the interpolant to find local maxima and minima
-    -for the highest set of local maxima found, compute peak-to-peak time
+    Given a time-accurate solution, this function will return the period and
+    the interpolated time history over one period. The following algorithm will
+    be used:
+    -interpolate the last third of the given time history with a Fourier series
+    -find the maximum function value from the end of the interpolant
+    -find a handful of points that are closest to the maximum
+    -group those points into different peak clusters
+    -find the average time corresponding to each cluster
+    -define period as average time interval between average peak times
     
     Input:
       - time samples, t (as a list)
@@ -241,6 +249,7 @@ def extractPeriod(t,f):
       - function values over a period, f_period (as a list)
     """
     from matplotlib import pylab as plt
+    import math
     
     # length of the time history
     n = len(t)
@@ -253,16 +262,144 @@ def extractPeriod(t,f):
     # interpolate these points using a Fouier series
     t_end_int, f_end_int, dummy = fourierInterp(t_end, f_end)
     
-    plt.figure()
-    plt.plot(t_end,f_end,'k*')
-    plt.plot(t_end_int,f_end_int,'k.')
-    
     # since the above Fourier interpolation function assumes perfect 
     # periodicity of the points given to it, the fit will likely be quite
-    # inaccurate at the ends.
+    # inaccurate at the ends. So, only use the middle 70% of the interpolation
+    # by cutting off the first and last 15%.
+    cut_percent = 15
+    frac = cut_percent/100.0
+    n = len(t_end_int)
+    t_clean = t_end_int[int(math.ceil(n*frac)):int(math.floor(-n*frac))]
+    f_clean = f_end_int[int(math.ceil(n*frac)):int(math.floor(-n*frac))]
+       
+    # find max and min function values present in the last third of the 
+    # "cleaned" data. this way, if any transient effects have made their way 
+    # into the data, they hopefully won't corrupt the result
+    n = len(f_clean)    
+    max_f = max(f_clean[-n/3:])
+    min_f = min(f_clean[-n/3:])
     
-    return
+    # find a handful of other points that come closest to the maximum. start 
+    # with a small tolerance and then keep doubling it until the desired number
+    # of other points has been found.
+    other_points = 16
+    tol = 1e-8
+    indices_maxes = []
+    while len(indices_maxes) < other_points+1:
+        indices_maxes = [i for i in range(n) if f_clean[i] > max_f-tol]
+        tol *= 2.0
+        
+    # now find the other points closest to the minimum
+    tol = 1e-8
+    indices_mins = []
+    while len(indices_mins) < other_points+1:
+        indices_mins = [i for i in range(n) if f_clean[i] < min_f+tol]
+        tol *= 2.0
     
+    # plotting: these lists are for plotting purposes only
+    t_maxes = [t_clean[i] for i in indices_maxes]
+    f_maxes = [f_clean[i] for i in indices_maxes]
+    t_mins = [t_clean[i] for i in indices_mins]
+    f_mins = [f_clean[i] for i in indices_mins]
+    
+    # plotting: instantiate the figure and plot some results
+    plt.figure()
+    plt.plot(t_end,f_end,'ko',label='$last\,1/3$')
+    plt.plot(t_end_int,f_end_int,'k--',label='$Fourier\,interp.$')
+    plt.plot(t_clean,f_clean,'r-',label='$trimmed$')
+    plt.plot(t_maxes, f_maxes, 'y.', label='$near\,tips$')
+    plt.plot(t_mins, f_mins, 'y.')
+    
+    #-------------------------------------------------------------------------#
+    def points_to_period(indices, t, f):
+        """
+        This function takes the list of extremum indices (either indices_max or
+        indices_min) and clusters them into groups based on their spacing. It 
+        then takes each cluster and finds an average corresponding time value. 
+        
+        Input:
+          - list of indices corresponding to extrema, indices
+          - larger list of time points over which extrema were found, t
+          - larger list of function values, f (N.B. only needed for plotting)
+        Output:
+          - period based on the given set of extrema, T_extremum
+        """
+        # go through the list of maxima or minima and separate into clusters 
+        # any points that are only one index apart. cluster is a list of lists.
+        cluster = []
+        cluster.append([indices[0]])
+        n_clusters = 1
+        for i in range(len(indices)-1):
+            if indices[i+1] == indices[i]+1:
+                cluster[n_clusters-1].append(indices[i+1])
+            else:
+                cluster.append([indices[i+1]])
+                n_clusters += 1
+    
+        # average the time values corresponding to each cluster
+        t_tips = []
+        f_tips = []                  # needed only for plotting
+        for i in range(n_clusters):
+            cluster_times = [t[entry] for entry in cluster[i]]
+            t_tips.append(sum(cluster_times)/len(cluster[i]))
+            # needed only for plotting
+            cluster_func_vals = [f_clean[entry] for entry in cluster[i]]
+            f_tips.append(sum(cluster_func_vals)/len(cluster[i]))
+
+        # plot the average maxes or mins
+        plt.plot(t_tips,f_tips,'b*',label='$max/min \, tips$')
+        
+        # for the tips found, find the time intervals in between adjacent ones
+        t_intervals = []    
+        for i in range(len(t_tips)-1):
+            t_intervals.append(t_tips[i+1]-t_tips[i])
+    
+        # define the period as being the average time interval found above
+        T_extremum = sum(t_intervals)/(len(t_tips)-1)
+        
+        return T_extremum
+    #-------------------------------------------------------------------------#
+    
+    # use the lists of maxes and mins and get the corresponding periods
+    T_peaks = points_to_period(indices_maxes, t_clean, f_clean)
+    T_troughs = points_to_period(indices_mins, t_clean, f_clean)
+    
+    # define period as the average value of the two values for period above
+    T = (T_peaks + T_troughs)/2
+    
+    # round period to two decimal points 
+    T = round(T,2)
+    
+    # print results to the screen
+    print '\nperiod-extraction results:'
+    print '\tT_peaks = ', T_peaks
+    print '\tT_troughs = ', T_troughs
+    print '\tT = ', T
+    
+    # plotting: finish plot of the period-extraction process
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f(t)$', fontsize=18)
+    plt.legend(loc='best', ncol=1)
+    plt.title(r'$T = \,$'+str(T))
+    # plotting: save image
+    plot_name = 'period_extraction'
+    print 'saving image...'
+    plt.savefig(plot_name, dpi=1000)
+    print 'figure saved: ' + plot_name
+    
+    # recover one peak-to-peak time trace of the interpolation
+    delta_t = t_clean[1]-t_clean[0]
+    points_period = int(round(T/delta_t))
+    last_period = f_clean[-points_period:]
+    max_f = max(last_period)
+    max_index = last_period.index(max_f)
+    max_index_clean = -points_period+max_index
+    t_period = myLinspace(0,T,points_period+1)
+    f_period = f_clean[max_index_clean-points_period:max_index_clean+1]
+    
+    return (T, t_period, f_period)
     
 # this functions returns the l2-norm of a given list ##########################
 def myNorm(x):
@@ -332,7 +469,7 @@ def main():
     f_fine, dfdt_fine, df2dt2_fine = myPeriodicSignal(t_fine,T)
     
     # plotting: USER INPUT. Would you like to plot this verification figure?\
-    plot_figure = True
+    plot_figure = False
     plot_name = 'TS verification'
     
     if plot_figure == True:
@@ -367,7 +504,7 @@ def main():
     ###########################################################################
     delta_t = 0.05            # time step
     initial_value = 8        # intitial condition
-    t_end = 20               # final time
+    t_end = 25               # final time
   
     f = []
     times = []
@@ -385,7 +522,7 @@ def main():
             
     # plotting: USER INPUTS! do you want to animate the solution history or just
     # plot the final result? (True = animate, False = just print final result)
-    animate_plot = True                     
+    animate_plot = False                     
     plot_name = 'time-accurate ODE'
     n_images = time_points            # total number of images computed
     skip_images = 1                   # images to skip between animation frames
@@ -433,16 +570,22 @@ def main():
     ###########################################################################
     # [time accurate] extract period from time-marching solution###############
     ###########################################################################
+
+    T, t_period, f_period = extractPeriod(times,f)
+    
+    # plot an isolated period by itself
     plt.figure()
-    plt.plot(times,f,'k-')
-    plt.rc('text', usetex=True)               # for using latex
-    plt.rc('font', family='serif')            # setting font
+    plt.plot(t_period,f_period,'k-')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f(t)$', fontsize=18)
-    
-    extractPeriod(times,f)
-    
-    
+    plot_name = 'period_extraction check'
+    print 'saving image...'
+    plt.savefig(plot_name, dpi=1000)
+    print 'figure saved: ' + plot_name
+   
+
+
+    #'''
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
@@ -491,7 +634,7 @@ def main():
     
     # plotting: user input! do you want to animate the solution history or just
     # plot the final result? (True = animate, False = just print final result)
-    animate_plot = True                     
+    animate_plot = False                     
     plot_name = 'TS explicit pseudo'
     n_images = iteration+1
     skip_images = 5000
@@ -569,7 +712,7 @@ def main():
     print 'saving final image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
-    
+    #'''
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
     main()
