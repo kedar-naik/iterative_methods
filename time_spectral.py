@@ -372,9 +372,9 @@ def extractPeriod(t,f):
     
     # print results to the screen
     print '\nperiod-extraction results:'
-    print '\tT_peaks = ', T_peaks
-    print '\tT_troughs = ', T_troughs
-    print '\tT = ', T
+    print '  T_peaks = ', T_peaks
+    print '  T_troughs = ', T_troughs
+    print '  T = ', T
     
     # plotting: finish plot of the period-extraction process
     plt.rc('text', usetex=True)               # for using latex
@@ -384,10 +384,12 @@ def extractPeriod(t,f):
     plt.legend(loc='best', ncol=1)
     plt.title(r'$T = \,$'+str(T))
     # plotting: save image
-    plot_name = 'period_extraction'
+    plot_name = 'period extraction'
     print 'saving image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
+    #plotting: free memory
+    plt.close()
     
     # recover one peak-to-peak time trace of the interpolation
     delta_t = t_clean[1]-t_clean[0]
@@ -433,7 +435,7 @@ def main():
     # user inputs
     N = 17                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
-    T=1.0
+    T=2.0
     
     # create the time-spectral operator 
     D = time_spectral_operator(N,T)
@@ -498,6 +500,7 @@ def main():
         print 'saving fig. ' + plot_name + '...'
         plt.savefig(plot_name, dpi=1000)
         print 'fig.' + plot_name + ' saved'
+        plt.close()
     
     ###########################################################################
     # [time accurate] explicit euler ##########################################
@@ -567,25 +570,32 @@ def main():
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
     
+    # free memory used for the plot
+    plt.close(fig)
+    
     ###########################################################################
-    # [time accurate] extract period from time-marching solution###############
+    # [time accurate] extract period from time-marching solution ##############
     ###########################################################################
-
+    
+    # pass the time-accurate solution history to the extractPeriod function
     T, t_period, f_period = extractPeriod(times,f)
     
     # plot an isolated period by itself
     plt.figure()
     plt.plot(t_period,f_period,'k-')
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{mathtools}"]
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f(t)$', fontsize=18)
-    plot_name = 'period_extraction check'
+    plt.title(r'$\textit{steady-state period extracted from '+\
+                r'time-accurate result}$')
+    plot_name = 'period extraction check'
     print 'saving image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
-   
-
-
-    #'''
+    plt.close()
+    
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
@@ -712,7 +722,32 @@ def main():
     print 'saving final image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
-    #'''
+    
+    # free memory used for the plot
+    plt.close(fig)
+    
+    ###########################################################################
+    # compare the time-spectral results against the time-accurate one #########
+    ###########################################################################
+    
+    # plot both isolated period atop one another
+    plt.figure()
+    plt.plot(t_period,f_period,'b-', label=r'$\textit{time-accurate}$')
+    plt.plot(t,f_TS_hist[-1],'ko')
+    t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[-1])
+    plt.plot(t_int,f_TS_int,'k--', label=r'$\textit{time-spectral } \left(N='+str(N)+r'\right)$')
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{mathtools}"]
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f(t)$', fontsize=18)
+    plt.legend(loc='best')
+    plot_name = 'comparison - TS vs TA'
+    print 'saving image...'
+    plt.savefig(plot_name, dpi=1000)
+    print 'figure saved: ' + plot_name
+    plt.close()
+    
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
     main()

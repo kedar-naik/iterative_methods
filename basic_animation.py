@@ -128,3 +128,6 @@ with writer.saving(fig, plot_name+'.mp4', dpi):
 print 'saving final image...'
 plt.savefig(plot_name, dpi=1000)
 print 'figure saved: ' + plot_name
+
+# free memory used for the plot
+plt.close(fig)
