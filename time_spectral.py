@@ -62,10 +62,10 @@ def myPeriodicSignal(t,T):
     import math
   
     # Type in your analytical function and dervatives here:
-    #f = [pow(math.sin(2*math.pi*t_i/T),3)+pow(math.cos(2*math.pi*t_i/T),3) + 9 \
+    #f = [pow(math.sin(2*math.pi*t_i/T),3)+pow(math.cos(2*math.pi*t_i/T),3)+9 \
      #    for t_i in t]
     #dfdt = [(-1/T)*(3*math.pi*math.sin(4*math.pi*t_i/T)* \
-      #      (math.cos(2*math.pi*t_i/T) - math.sin(2*math.pi*t/T))) for t_i in t] 
+      #    (math.cos(2*math.pi*t_i/T) - math.sin(2*math.pi*t/T))) for t_i in t] 
   
     f = [math.sin(2*math.pi*t_i/T)+9 for t_i in t]
     dfdt = [(2*math.pi/T)*math.cos(2*math.pi*t_i/T) for t_i in t]
@@ -74,7 +74,14 @@ def myPeriodicSignal(t,T):
     dfdt = [(-2*math.pi/T)*math.sin(2*math.pi*t_i/T) for t_i in t]
     df2dt2 = [-pow(2*math.pi/T,2)*math.cos(2*math.pi*t_i/T) for t_i in t]
     
-    return (f, dfdt, df2dt2)
+    # type out the expression you have entered as a raw string in latex form
+    two_over_T = 2.0/T
+    if two_over_T != 1.0:
+        name = r'f(t)=cos('+str(two_over_T)+'\pi t)'
+    else:
+        name = r'f(t)=cos(\pi t)'
+    
+    return (f, dfdt, df2dt2, name)
   
   
 # this function returns the value of a user-defined 1st-order ODE ############
@@ -158,20 +165,22 @@ def myLinspace(start,end,n):
         return points
     
 # this function interpolates a series of points with a Fourier series #########
-def fourierInterp(x,y):
+def fourierInterp(x, y, x_int=None):
     
     """
     This function interpolates a given set of ordinates and abscissas with a
     Fourier series. The function returns a Fourier interpolation (of the 
-    highest degree trig polynomial allowed by the Nyquist Criterion) along with 
-    the corresponding new set of abscissas, which are ten times as finely 
-    spaced as the original. The first derivative of the interpolant is also 
-    returned. Note that the interpolants will only be exact if the given points
-    are just one shy of representing an exact period
+    highest degree trig polynomial allowed by the Nyquist Criterion) on the 
+    given grid of new abscissas. If no vector of desired abscissas is given, 
+    the set of interpolant abscissas is set automatically to be ten times as 
+    finely spaced as the original. The first derivative of the interpolant is 
+    also returned. Note that the interpolants will only be exact if the given 
+    points are just one shy of representing an exact period.
     
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
       - ordinates, y (as a list) (again, leave out last point, if periodic)
+      - new abscissas, x_int (as a list) (optional! defaults to 10x refinement)
     Output:
       - new abscissas, x_int (as a list)
       - interpolated ordinates, y_int (as a list)
@@ -209,9 +218,14 @@ def fourierInterp(x,y):
             a[j] += (2.0/n)*math.cos(j*scaled_x)*y[i]
             b[j] += (2.0/n)*math.sin(j*scaled_x)*y[i]
     
+    # set x_int, if it hasn't been given
+    if x_int == None:
+        n_int = refine_fac*(n)
+        x_int = myLinspace(x[0],x[-1]+x_interval,n_int)
+    else:
+        n_int = len(x_int)
+    
     # find the actual interpolation
-    n_int = refine_fac*(n+1)
-    x_int = myLinspace(x[0],x[-1]+x_interval,n_int)
     y_int = [0.0]*n_int
     dydx_int = [0.0]*n_int
     for i in range(n_int):
@@ -226,6 +240,74 @@ def fourierInterp(x,y):
                             a[j+1]*math.sin((j+1)*scaled_x_int))
     
     return (x_int, y_int, dydx_int)
+    
+
+# this function linearly interpolates a series of points ######################
+def linearInterp(x, y, x_int=None):
+    
+    """
+    This function interpolates a given set of ordinates and abscissas with line
+    segments between given points onto the given grid of new abscissas. If no 
+    vector of desired abscissas is given, the set of interpolant abscissas is 
+    set automatically to include as many new points between the original ones
+    as specified below (set to 2, by default).
+    
+    Input:
+      - abscissas, x (as a list) (leave out last, duplicate point in period)
+      - ordinates, y (as a list) (again, leave out last point, if periodic)
+      - new abscissas, x_int (as a list) (optional! defaults to 2x refinement)
+    Output:
+      - new abscissas, x_int (as a list)
+      - interpolated ordinates, y_int (as a list)
+    """
+    
+    # setting the desired level of refinement of the interpolant abscissas.
+    # enter the desired number of points you'd like to have appear beetween 
+    # neighboring original abscissas. (e.g. if the original points are [0,2,4]
+    # and you want the interpolant to be defined on [0,1,2,3,4], then the 
+    # points_between is 1.)
+    points_between = 2
+    
+    # number of original abscissas
+    n = len(x)                  
+    
+    # if x_int hasn't been given, set it
+    if x_int == None:
+        x_int = []
+        for i in range(n-1):
+            x_int.append(x[i])
+            interval = (x[i+1]-x[i])/float(points_between+1)
+            for k in range(points_between):
+                x_int.append(x_int[-1]+interval)
+        x_int.append(x[-1])
+    
+    # number of interpolant abscissas
+    n_int = len(x_int)
+    
+    # compute the interpolant
+    y_int = []
+    for i in range(n_int):
+        # for each x_int, find the two closest x values
+        distances = []
+        for k in range(n):
+            distances.append(abs(x_int[i]-x[k]))
+        sorted(distances)
+        indices = [distances.index(entry) for entry in sorted(distances)]
+        first_two_indices = indices[:2]
+        i1 = min(first_two_indices)
+        i2 = max(first_two_indices)
+        # if this x_int happens to be exactly halfway between two x values
+        if i1 == i2:
+            i2 = i1 + 1
+        # find the corresponding x and y values
+        x1 = x[i1]
+        x2 = x[i2]
+        y1 = y[i1]
+        y2 = y[i2]
+        # use the y values corresponding to the two x values to interpolate
+        y_int.append(y1 + (y2-y1)*(x_int[i]-x1)/(x2-x1))
+    
+    return (x_int, y_int)
     
 # this function extracts the period of steady-state oscillations ##############
 def extractPeriod(t,f):
@@ -384,40 +466,71 @@ def extractPeriod(t,f):
     plt.legend(loc='best', ncol=1)
     plt.title(r'$T = \,$'+str(T))
     # plotting: save image
-    plot_name = 'period extraction'
-    print 'saving image...'
+    plot_name = 'period extraction process'
+    print '\nsaving image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
     #plotting: free memory
     plt.close()
     
-    # recover one peak-to-peak time trace of the interpolation
+    # recover one peak-to-peak time trace of the interpolation (this portion 
+    # should always be valid and not need to be changed)
     delta_t = t_clean[1]-t_clean[0]
-    points_period = int(round(T/delta_t))
+    points_period = int(round(T/delta_t)+1)
     last_period = f_clean[-points_period:]
     max_f = max(last_period)
     max_index = last_period.index(max_f)
     max_index_clean = -points_period+max_index
-    t_period = myLinspace(0,T,points_period+1)
-    f_period = f_clean[max_index_clean-points_period:max_index_clean+1]
+    start_at_clean = max_index_clean-points_period+1
+    max_t = t_clean[max_index_clean]
+    #t_start = t_clean[start_at_clean]
+    t_period_0 = t_clean[start_at_clean:max_index_clean+1]
+    f_period_0 = f_clean[start_at_clean:max_index_clean+1]
+    
+    # N.B. We will assume that the point (t_max, f_max) is the actual peak of 
+    # the steady-state period. (It might not be, of course: the discretization
+    # might have just missed the actual peak.) We will take this peak and force 
+    # it to represent the value of T in t_period, by subtracting off (t_max-T)
+    # from the period_points times behind t_max. 
+    t_period_0 = [entry-(max_t-T) for entry in t_period_0]
+    
+    # N.B. The first point above will most probably NOT correspond to zero!!! 
+    # (It will be off by eps <= delta_t/2.) In order to get the first point to 
+    # correspond to zero, without strechting or squuezing the actual curve, we 
+    # will do a linear interpolation to a uniform grid within the range [0,T].
+    t_period = myLinspace(0,T,points_period)
+    t_period, f_period = linearInterp(t_period_0, f_period_0, t_period)
     
     return (T, t_period, f_period)
     
-# this functions returns the l2-norm of a given list ##########################
-def myNorm(x):
+# this function returns the p-norm (defaults to the l2-norm) of a vector ######
+def myNorm(x, p=2):
     """
-    This function returns the l2-norm of a given list of numbers.
+    This function returns the p-norm of a given vector. If no value for p is 
+    provided, the l2-norm is a returned. The infinity norm is returned by 
+    specifying p='inf'.
+    e.g.
+      - p=1:        l1-norm, "Taxicab norm"
+      - p=2:        l2-norm, "Euclidian norm"
+      - p='inf':    infinity norm
     
     Input:
       - vector, x (as a list) 
+      - type of norm, p (defaults to p=2. p='inf' gives the infinity norm)
     Output:
       - l2-norm, norm
     """
     
-    import math
-    
-    abs_sq = [abs(float(entry))**2 for entry in x]
-    norm = math.sqrt(sum(abs_sq))
+    assert (p >= 1.0), 'p-norm not defined for p < 1'
+        
+    if p == 'inf':
+        # for the infinity norm
+        abs_x = [abs(entry) for entry in x]
+        norm = max(abs_x)
+    else:
+        # for any other p-norm
+        abs_p = [abs(float(entry))**p for entry in x]
+        norm = sum(abs_p)**(1.0/p)
     
     return norm
     
@@ -433,7 +546,7 @@ def main():
     plt.close('all')
         
     # user inputs
-    N = 17                  # number of time instaces
+    N = 15                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
     T=2.0
     
@@ -454,7 +567,7 @@ def main():
     ###########################################################################
     
     # sampling at the time instances
-    f_TS, dummy1, dummy2 = myPeriodicSignal(t,T)
+    f_TS, dummy1, dummy2, name = myPeriodicSignal(t,T)
     
     # the time derivatives at the time instances using time-spectral operator
     dfdt_TS = myMult(D, f_TS)
@@ -462,16 +575,27 @@ def main():
     # find the second derviative using the time-spectral operator as well
     df2dt2_TS = myMult(D, dfdt_TS)
     
-    # interpolate the time-spectral results with Fourier series
-    t_int, dfdt_TS_int, dummy1 = fourierInterp(t, dfdt_TS)
-    t_int, df2dt2_TS_int, dummy1 = fourierInterp(t, df2dt2_TS)
+    # USER INPUT: set the type of interpolation (fourier, linear)
+    interp_type = 'fourier'
+    
+    if interp_type == 'fourier':
+        # interpolate the time-spectral results with Fourier series
+        t_int, dfdt_TS_int, dummy1 = fourierInterp(t, dfdt_TS)
+        t_int, df2dt2_TS_int, dummy1 = fourierInterp(t, df2dt2_TS)
+        interp_label = '$(Fourier \, Interp.)$'
+    
+    if interp_type == 'linear':
+        # interpolate the time-spectral results with line segments
+        t_int, dfdt_TS_int = linearInterp(t, dfdt_TS)
+        t_int, df2dt2_TS_int = linearInterp(t, df2dt2_TS)
+        interp_label = '$(Linear \, Interp.)$'
     
     # fine time grid (10 times the number of time instances) for "exact" values
     t_fine = [T*index/(10*N-1) for index in range(10*N)]
-    f_fine, dfdt_fine, df2dt2_fine = myPeriodicSignal(t_fine,T)
+    f_fine, dfdt_fine, df2dt2_fine, name = myPeriodicSignal(t_fine,T)
     
-    # plotting: USER INPUT. Would you like to plot this verification figure?\
-    plot_figure = False
+    # plotting: USER INPUT. Would you like to plot this verification figure?
+    plot_figure = True
     plot_name = 'TS verification'
     
     if plot_figure == True:
@@ -486,16 +610,17 @@ def main():
         # plot the time instances
         plt.plot(t,f_TS,'ko',label='$f_{TS}$')
         # plot the time-spectral first dervative and interpolation
-        plt.plot(t,dfdt_TS,'go',label='$df_{TS}/dt')
-        plt.plot(t_int,dfdt_TS_int,'g--',label='$(Fourier \, Interp.)$')
+        plt.plot(t,dfdt_TS,'go',label='$df_{TS}/dt$')
+        plt.plot(t_int,dfdt_TS_int,'g--',label=interp_label)
         # plot the time-spectral second dervative and interpolation
-        plt.plot(t,df2dt2_TS,'yo',label='$d^2f_{TS}/dt^2')
-        plt.plot(t_int,df2dt2_TS_int,'y--',label='$(Fourier \, Interp.)$')
+        plt.plot(t,df2dt2_TS,'yo',label='$d^2f_{TS}/dt^2$')
+        plt.plot(t_int,df2dt2_TS_int,'y--',label=interp_label)     
         # limits, labels, legend, title
         plt.xlabel(r'$t$', fontsize=18)
         plt.ylabel('')
         plt.legend(loc='best', ncol=2)
-        plt.title(r'$N = \,$'+str(N))
+        #plt.title(r'$N = \,$'+str(N))
+        plt.title(r'$'+name+r'$ \quad (N = \,$'+str(N)+'$)$')
         # save figure
         print 'saving fig. ' + plot_name + '...'
         plt.savefig(plot_name, dpi=1000)
@@ -578,7 +703,7 @@ def main():
     ###########################################################################
     
     # pass the time-accurate solution history to the extractPeriod function
-    T, t_period, f_period = extractPeriod(times,f)
+    T_extracted, t_period, f_period = extractPeriod(times,f)
     
     # plot an isolated period by itself
     plt.figure()
@@ -590,12 +715,12 @@ def main():
     plt.ylabel(r'$f(t)$', fontsize=18)
     plt.title(r'$\textit{steady-state period extracted from '+\
                 r'time-accurate result}$')
-    plot_name = 'period extraction check'
+    plot_name = 'isolated period extracted'
     print 'saving image...'
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
     plt.close()
-    
+        
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
@@ -730,12 +855,39 @@ def main():
     # compare the time-spectral results against the time-accurate one #########
     ###########################################################################
     
-    # plot both isolated period atop one another
+    # set the number of comparison points to that of the finer solution
+    n_comp_pts = max(len(t_period),len(t_int))
+    t_comp_pts = myLinspace(0,T,n_comp_pts)
+    
+    # interpolate both solutions onto the finer grid (interpolating the finer
+    # solution will return the same thing...redundant, but easier to code)
+    t_period_comp, f_period_comp = linearInterp(t_period, f_period, t_comp_pts)
+    t_int_comp, f_TS_int_comp = linearInterp(t_int, f_TS_int, t_comp_pts)
+    
+    # now, try shifting the extracted TA period, one index at a time (from 3
+    # indices before to 3 indices after its current location), until the sum of
+    # the differences between it and the time-spectral curve is the smallest
+    max_shift = 3
+    trial_shifts = range(-max_shift, max_shift+1)
+    norm_diffs = []
+    for shift in trial_shifts:
+        f_period_shift = f_period_comp[shift:] + f_period_comp[:shift]
+        diffs = [f_period_shift[i]-f_TS_int_comp[i] for i in range(n_comp_pts)]
+        norm_diffs.append(myNorm(diffs,1))
+    
+    # recover the number of shifted indices that minimize the difference
+    min_index = norm_diffs.index(min(norm_diffs))
+    optimal_shift = trial_shifts[min_index]
+    f_period_opt = f_period_comp[optimal_shift:]+f_period_comp[:optimal_shift]
+    
+    # plot boths isolated periods atop one another
     plt.figure()
-    plt.plot(t_period,f_period,'b-', label=r'$\textit{time-accurate}$')
+    # plot the extracted time-accurate period
+    plt.plot(t_int_comp,f_period_opt,'b-', label=r'$\textit{time-accurate}$')
+    # plot the interpolated time-spectral solution
     plt.plot(t,f_TS_hist[-1],'ko')
-    t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[-1])
-    plt.plot(t_int,f_TS_int,'k--', label=r'$\textit{time-spectral } \left(N='+str(N)+r'\right)$')
+    plt.plot(t_int_comp, f_TS_int_comp,'k--', \
+             label=r'$\textit{time-spectral } \left(N='+str(N)+r'\right)$')
     plt.rc('text', usetex=True)               # for using latex
     plt.rc('font', family='serif')            # setting font
     matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{mathtools}"]
@@ -747,6 +899,7 @@ def main():
     plt.savefig(plot_name, dpi=1000)
     print 'figure saved: ' + plot_name
     plt.close()
+    
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
