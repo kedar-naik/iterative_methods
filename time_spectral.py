@@ -14,7 +14,6 @@ def time_spectral_operator(N,T):
     Inputs: 
       - N: number of time instances
       - T: period of oscillaton
-    
     Output:
       - D: time-spectral operator matrix (as a list of list)
     """
@@ -101,12 +100,12 @@ def myPeriodicODE(t,T,u):
     
     # The equation for periodic population harvesting
     k = 0.5                   # growth rate of the population
-    N = 10                    # carrying capacity
+    C = 10                    # carrying capacity
     h = 0.5                   # determines total rate of periodic harvesting
     b = 2*math.pi/T           # b = 2*pi/period of the sinusoidal function
     
-    dudt = k*u*(1-(u/N)) - h*(1+math.sin(b*t))
-    dudt = k*u*(1-(u/N)) - h*(1+math.sin(b*t)*math.cos(b*t)**4)
+    dudt = k*u*(1-(u/C)) - h*(1+math.sin(b*t))
+    dudt = k*u*(1-(u/C)) - h*(1+math.sin(b*t)*math.cos(b*t)**4.0)
     
     return dudt
   
@@ -316,11 +315,13 @@ def extractPeriod(t,f):
     the interpolated time history over one period. The following algorithm will
     be used:
     -interpolate the last third of the given time history with a Fourier series
-    -find the maximum function value from the end of the interpolant
-    -find a handful of points that are closest to the maximum
-    -group those points into different peak clusters
+    -shave off the ends of the interpolant to account for inaccuracies
+    -find the max and min function value from the end of the interpolant
+    -find a handful of points that are closest to the max and min
+    -group those points into different peak/trough clusters
     -find the average time corresponding to each cluster
-    -define period as average time interval between average peak times
+    -define period as average time interval between average peak/trough times
+    -define overall period as the average of periods found from peaks/troughs
     
     Input:
       - time samples, t (as a list)
@@ -397,7 +398,9 @@ def extractPeriod(t,f):
         """
         This function takes the list of extremum indices (either indices_max or
         indices_min) and clusters them into groups based on their spacing. It 
-        then takes each cluster and finds an average corresponding time value. 
+        then takes each cluster and finds an average corresponding time value.
+        The average time span between clusters is taken to be the period for
+        the given set of extrema.
         
         Input:
           - list of indices corresponding to extrema, indices
@@ -468,7 +471,7 @@ def extractPeriod(t,f):
     # plotting: save image
     plot_name = 'period extraction process'
     print '\nsaving image...'
-    plt.savefig(plot_name, dpi=1000)
+    plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     #plotting: free memory
     plt.close()
@@ -483,7 +486,6 @@ def extractPeriod(t,f):
     max_index_clean = -points_period+max_index
     start_at_clean = max_index_clean-points_period+1
     max_t = t_clean[max_index_clean]
-    #t_start = t_clean[start_at_clean]
     t_period_0 = t_clean[start_at_clean:max_index_clean+1]
     f_period_0 = f_clean[start_at_clean:max_index_clean+1]
     
@@ -546,7 +548,7 @@ def main():
     plt.close('all')
         
     # user inputs
-    N = 15                  # number of time instaces
+    N = 17                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
     T=2.0
     
@@ -623,7 +625,7 @@ def main():
         plt.title(r'$'+name+r'$ \quad (N = \,$'+str(N)+'$)$')
         # save figure
         print 'saving fig. ' + plot_name + '...'
-        plt.savefig(plot_name, dpi=1000)
+        plt.savefig(plot_name, dpi=500)
         print 'fig.' + plot_name + ' saved'
         plt.close()
     
@@ -692,7 +694,7 @@ def main():
     
     # plotting: save an image of the final frame
     print 'saving final image...'
-    plt.savefig(plot_name, dpi=1000)
+    plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     
     # free memory used for the plot
@@ -717,10 +719,10 @@ def main():
                 r'time-accurate result}$')
     plot_name = 'isolated period extracted'
     print 'saving image...'
-    plt.savefig(plot_name, dpi=1000)
+    plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     plt.close()
-        
+    
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
@@ -795,9 +797,13 @@ def main():
     white_space = ampl_final/3.0
     plt.xlim(0,T)
     if animate_plot == True:
-        plt.ylim(ave_init_value, max_final+white_space)
+        start = min(ave_init_value, max_final+white_space)
+        finish = max(ave_init_value, max_final+white_space)        
+        plt.ylim(start, finish)
     else:
-        plt.ylim(min_final-white_space,max_final+white_space)
+        start = min(min_final-white_space,max_final+white_space)
+        finish = max(min_final-white_space,max_final+white_space)
+        plt.ylim(start, finish)
     # residual history plot
     plt.subplot(1,2,2)
     res, = plt.semilogy([], [],'b-',label='residual')
@@ -805,7 +811,9 @@ def main():
     plt.ylabel(r'$\|R\|$', fontsize=18)
     plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
     plt.xlim(0,iteration)
-    plt.ylim(1e-5,10)
+    min_power = int(math.log(min(res_hist),10))-1
+    max_power = int(math.log(max(res_hist),10))+1
+    plt.ylim(pow(10,min_power), pow(10,max_power))
     
     # plotting: set the total number of frames
     if animate_plot == True:
@@ -845,7 +853,7 @@ def main():
     
     # plotting: save an image of the final frame
     print 'saving final image...'
-    plt.savefig(plot_name, dpi=1000)
+    plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     
     # free memory used for the plot
@@ -867,7 +875,7 @@ def main():
     # now, try shifting the extracted TA period, one index at a time (from 3
     # indices before to 3 indices after its current location), until the sum of
     # the differences between it and the time-spectral curve is the smallest
-    max_shift = 3
+    max_shift = 10
     trial_shifts = range(-max_shift, max_shift+1)
     norm_diffs = []
     for shift in trial_shifts:
@@ -896,10 +904,219 @@ def main():
     plt.legend(loc='best')
     plot_name = 'comparison - TS vs TA'
     print 'saving image...'
-    plt.savefig(plot_name, dpi=1000)
+    plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     plt.close()
     
+    ###########################################################################
+    # [time spectral] Gauss-Seidel analogy w/ explict pseudo-timestepping #####
+    ###########################################################################
+    import random
+    
+    max_sweeps = 500000          # max number of Gauss-Seidel sweeps to try
+    init_value = 5.5             # constant intital guess
+    delta_tau_init = 0.001       # pseudo-timestep
+    conv_criteria = 1e-4         # resdiual convergence criteria
+    
+    # Initialize lists
+    res_hist = []                # residual history
+    f_TS_hist =[]                # solution history
+    f_TS_new = []                # new solution (needed only to stop warning)
+    
+    # begin the Gauss-Seidel sweeps. (N.B. One sweep corresponds to each row
+    # having been advanced by ONE pseudo-timestep!)
+    for sweep in range(max_sweeps): 
+        
+        # set the old solution        
+        if sweep == 0:
+            # for first sweep, set intial guess for periodic solution
+            f_TS_init = [init_value for index in indices]
+            #f_TS_init = [random.random()*init_value for index in indices]
+            f_TS_hist.append(f_TS_init)
+            f_TS_old = f_TS_init
+            delta_tau = delta_tau_init
+        else:
+            f_TS_old = f_TS_new
+            
+        # clear the new solution holder
+        f_TS_new = []
+        
+        # perform one sweep (one pseudo-time step) down the rows       
+        for i in range(N):
+            
+            # rename/isolate the solution of the current row
+            f_TS_i = f_TS_old[i]
+            
+            # compute the source term for this row
+            rows_above = 0
+            for j in range(i):
+                rows_above += D[i][j]*f_TS_new[j]
+            rows_below = 0
+            for j in range(i+1,N):
+                rows_below += D[i][j]*f_TS_old[j]
+            diag_source = D[i][i]*f_TS_old[i]    # (should be zero for TS)
+            row_source =  rows_above + diag_source + rows_below
+            
+            # compute dfdt for this row from the ODE
+            dfdt_i = myPeriodicODE(t[i], T, f_TS_old[i])
+            
+            # calculate the residual for this pseudo-iteration
+            row_residual = dfdt_i - row_source
+            
+            # update the solution at this time instance
+            f_TS_i += delta_tau*row_residual
+            
+            # store the updated solution for this row
+            f_TS_new.append(f_TS_i)
+        
+        # append newly computed solution
+        f_TS_hist.append(f_TS_new)
+        # compute D*f
+        Df = myMult(D,f_TS_new)
+        # compute dfdt from the ODE
+        dfdt = [myPeriodicODE(t[index],T,f_TS_new[index]) for index in indices]
+        # compute the residual vector for this solution
+        res = [-Df[index]+dfdt[index] for index in indices]
+        # find the norm of the residual vector and store it
+        res_hist.append(myNorm(res))
+        # print the progress of the solution
+        print '[ sweep: ', sweep, ']', \
+              'residual = ', res_hist[sweep], '; delta_tau = ', delta_tau
+        # check residual stopping condition
+        if res_hist[sweep] < conv_criteria:
+            print '\n\tsolution found. (', sweep, 'sweeps required )\n'
+            break
+    
+    # plotting: user input! do you want to animate the solution history or just
+    # plot the final result? (True = animate, False = just print final result)
+    animate_plot = True                     
+    plot_name = 'TS Gauss-Seidel explicit pseudo'
+    n_images = sweep
+    skip_images = 1500
+    
+    # plotting: initializations and sizing
+    fig = plt.figure()
+    xdim, ydim = plt.gcf().get_size_inches()
+    plt.gcf().set_size_inches(2*xdim, ydim, forward=True)
+
+    # plotting: things that will not be changing inside the loop
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
+    # solution history plot
+    plt.subplot(1,2,1)
+    dots, = plt.plot([], [],'ko',label='$f_{TS}$')
+    line, = plt.plot([], [],'k--',label='$ Fourier \, interp.$')
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$f\left(t\right)$', fontsize=18)
+    ave_init_value = sum(f_TS_hist[0])/N
+    max_final = max(f_TS_hist[-1])
+    min_final = min(f_TS_hist[-1])
+    ampl_final = abs(max_final-min_final)
+    white_space = ampl_final/3.0
+    plt.xlim(0,T)
+    if animate_plot == True:
+        start = min(ave_init_value, max_final+white_space)
+        finish = max(ave_init_value, max_final+white_space)        
+        plt.ylim(start, finish)
+    else:
+        start = min(min_final-white_space,max_final+white_space)
+        finish = max(min_final-white_space,max_final+white_space)
+        plt.ylim(start, finish)
+    # residual history plot
+    plt.subplot(1,2,2)
+    res, = plt.semilogy([], [],'b-',label='residual')
+    plt.xlabel(r'$Gauss\textnormal{-}Seidel \, sweep$', fontsize=18)
+    plt.ylabel(r'$\|R\|$', fontsize=18)
+    plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
+    plt.xlim(0,sweep)
+    min_power = int(math.log(min(res_hist),10))-1
+    max_power = int(math.log(max(res_hist),10))+1
+    plt.ylim(pow(10,min_power), pow(10,max_power))
+    
+    # plotting: set the total number of frames
+    if animate_plot == True:
+        # capture all frames (skipping, if necessary) and the final frame
+        all_frames = range(0,n_images,skip_images+1)+[n_images-1]
+    else:
+        # no animation: just capture the last one
+        all_frames = [n_images-1]
+        
+    # plotting: capturing the movie
+    writer = animation.writers['ffmpeg'](fps=10)
+    with writer.saving(fig, plot_name+'.mp4', 100):
+        frame = 0
+        for n in all_frames:
+            # plot solution and interpolation
+            plt.subplot(1,2,1)
+            dots.set_data(t,f_TS_hist[n])
+            t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[n])
+            line.set_data(t_int,f_TS_int)
+            plt.title(r'$sweep \,\#$'+'$'+str(n)+'$')
+            plt.legend(loc='best')
+            # plot residual            
+            plt.subplot(1,2,2)
+            res.set_data(range(n),res_hist[:n])
+            # progress monitor
+            frame += 1
+            percent_done = float(n)*100.0/(n_images-1)
+            print 'capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                   round(percent_done,3),'%'
+            writer.grab_frame()
+        writer.grab_frame()
+        
+    # plotting: rescale the final frame to focus on the converged solution
+    if animate_plot == True:
+        plt.subplot(1,2,1)
+        plt.ylim(min_final-white_space,max_final+white_space)
+    
+    # plotting: save an image of the final frame
+    print 'saving final image...'
+    plt.savefig(plot_name, dpi=500)
+    print 'figure saved: ' + plot_name
+    
+    # free memory used for the plot
+    plt.close(fig)  
+    
+    
+    
+'''    
+
+                    # adjust the pseudo-timestep
+                    if iteration > 0:
+                        current_res = row_residual_hist[iteration]
+                        previous_res = row_residual_hist[iteration-1]
+                        res_ratio = previous_res/current_res                      
+                        sol_diff = abs(f_TS_i-f_TS_i_old)
+                        #if iteration < 120 and iteration > 80 and i == 3:
+                        #if iteration > 45000 and i == 2:
+                        #if iteration%print_every == 0:
+                        if res_ratio < 1.0 and print_count < 7:
+                            printing = True
+                            print_count += 1
+                            print 'current_res = ', current_res
+                            print 'previous_res =', previous_res  
+                            print 'res_ratio = ', previous_res/current_res
+                            print 'sol_diff = ', sol_diff
+                            print 'delta_tau = ', delta_tau
+                        else:
+                            printing = False
+                        #if delta_tau >= 1.0:
+                         #   delta_tau_new = delta_tau*(1.0/res_ratio)
+                        #else:
+                         #   delta_tau_new = delta_tau*(1.0*res_ratio)
+                        ratio = int(res_ratio)+1.2*(res_ratio%1)
+                        delta_tau_new = delta_tau*ratio
+                        if delta_tau_new > delta_tau_init:
+                            delta_tau = delta_tau_new
+                        if delta_tau > 2.0:
+                            delta_tau = delta_tau_init
+                    
+'''
+        
+        
+
+    
+
     
 # standard boilerplate to call the main() function
 if __name__ == '__main__':
