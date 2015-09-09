@@ -909,179 +909,16 @@ def main():
     plt.close()
     
     ###########################################################################
-    # [time spectral] Gauss-Seidel analogy w/ explict pseudo-timestepping #####
-    ###########################################################################
-
-    max_sweeps = 500000          # max number of Gauss-Seidel sweeps to try
-    init_value = 5.5             # constant intital guess
-    delta_tau_init = 0.001       # pseudo-timestep
-    conv_criteria = 1e-4         # resdiual convergence criteria
-    
-    # Initialize lists
-    res_hist = []                # residual history
-    f_TS_hist =[]                # solution history
-    f_TS_new = []                # new solution (needed only to stop warning)
-    
-    # begin the Gauss-Seidel sweeps. (N.B. One sweep corresponds to each row
-    # having been advanced by ONE pseudo-timestep!)
-    for sweep in range(max_sweeps): 
-        
-        # set the old solution        
-        if sweep == 0:
-            # for first sweep, set intial guess for periodic solution
-            f_TS_init = [init_value for index in indices]
-            f_TS_hist.append(f_TS_init)
-            f_TS_old = f_TS_init
-            delta_tau = delta_tau_init
-        else:
-            f_TS_old = f_TS_new
-            
-        # clear the new solution holder
-        f_TS_new = []
-        
-        # perform one sweep (one pseudo-time step) down the rows       
-        for i in range(N):
-            
-            # rename/isolate the solution of the current row
-            f_TS_i = f_TS_old[i]
-            
-            # compute the source term for this row
-            rows_above = 0
-            for j in range(i):
-                rows_above += D[i][j]*f_TS_new[j]
-            rows_below = 0
-            for j in range(i+1,N):
-                rows_below += D[i][j]*f_TS_old[j]
-            diag_source = D[i][i]*f_TS_old[i]    # (should be zero for TS)
-            row_source =  rows_above + diag_source + rows_below
-            
-            # compute dfdt for this row from the ODE
-            dfdt_i = myPeriodicODE(t[i], T, f_TS_old[i])
-            
-            # calculate the residual for this pseudo-iteration
-            row_residual = dfdt_i - row_source
-            
-            # update the solution at this time instance
-            f_TS_i += delta_tau*row_residual
-            
-            # store the updated solution for this row
-            f_TS_new.append(f_TS_i)
-        
-        # append newly computed solution
-        f_TS_hist.append(f_TS_new)
-        # compute D*f
-        Df = myMult(D,f_TS_new)
-        # compute dfdt from the ODE
-        dfdt = [myPeriodicODE(t[index],T,f_TS_new[index]) for index in indices]
-        # compute the residual vector for this solution
-        res = [-Df[index]+dfdt[index] for index in indices]
-        # find the norm of the residual vector and store it
-        res_hist.append(myNorm(res))
-        # print the progress of the solution
-        print '[ sweep: ', sweep, ']', \
-              'residual = ', res_hist[sweep], '; delta_tau = ', delta_tau
-        # check residual stopping condition
-        if res_hist[sweep] < conv_criteria:
-            print '\n\tsolution found. (', sweep, 'sweeps required )\n'
-            break
-    
-    # plotting: user input! do you want to animate the solution history or just
-    # plot the final result? (True = animate, False = just print final result)
-    animate_plot = True                     
-    plot_name = 'TS Gauss-Seidel explicit pseudo'
-    n_images = sweep
-    skip_images = 1500
-    
-    # plotting: initializations and sizing
-    fig = plt.figure()
-    xdim, ydim = plt.gcf().get_size_inches()
-    plt.gcf().set_size_inches(2*xdim, ydim, forward=True)
-
-    # plotting: things that will not be changing inside the loop
-    plt.rc('text', usetex=True)               # for using latex
-    plt.rc('font', family='serif')            # setting font
-    # solution history plot
-    plt.subplot(1,2,1)
-    dots, = plt.plot([], [],'ko',label='$f_{TS}$')
-    line, = plt.plot([], [],'k--',label='$ Fourier \, interp.$')
-    plt.xlabel(r'$t$', fontsize=18)
-    plt.ylabel(r'$f\left(t\right)$', fontsize=18)
-    ave_init_value = sum(f_TS_hist[0])/N
-    max_final = max(f_TS_hist[-1])
-    min_final = min(f_TS_hist[-1])
-    ampl_final = abs(max_final-min_final)
-    white_space = ampl_final/3.0
-    plt.xlim(0,T)
-    if animate_plot == True:
-        y1_start = min(ave_init_value, max_final+white_space)
-        y1_finish = max(ave_init_value, max_final+white_space)        
-        plt.ylim(y1_start, y1_finish)
-    else:
-        plt.ylim(min_final-white_space,max_final+white_space)
-    # residual history plot
-    plt.subplot(1,2,2)
-    res, = plt.semilogy([], [],'b-',label='residual')
-    plt.xlabel(r'$Gauss\textnormal{-}Seidel \, sweep$', fontsize=18)
-    plt.ylabel(r'$\|R\|$', fontsize=18)
-    plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
-    plt.xlim(0,sweep)
-    min_power = int(math.log(min(res_hist),10))-1
-    max_power = int(math.log(max(res_hist),10))+1
-    plt.ylim(pow(10,min_power), pow(10,max_power))
-    
-    # plotting: set the total number of frames
-    if animate_plot == True:
-        # capture all frames (skipping, if necessary) and the final frame
-        all_frames = range(0,n_images,skip_images+1)+[n_images-1]
-    else:
-        # no animation: just capture the last one
-        all_frames = [n_images-1]
-        
-    # plotting: capturing the movie
-    writer = animation.writers['ffmpeg'](fps=10)
-    with writer.saving(fig, plot_name+'.mp4', 100):
-        frame = 0
-        for n in all_frames:
-            # plot solution and interpolation
-            plt.subplot(1,2,1)
-            dots.set_data(t,f_TS_hist[n])
-            t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[n])
-            line.set_data(t_int,f_TS_int)
-            plt.title(r'$sweep \,\#$'+'$'+str(n)+'$')
-            plt.legend(loc='best')
-            # plot residual            
-            plt.subplot(1,2,2)
-            res.set_data(range(n),res_hist[:n])
-            # progress monitor
-            frame += 1
-            percent_done = float(n)*100.0/(n_images-1)
-            print 'capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
-                   round(percent_done,3),'%'
-            writer.grab_frame()
-        writer.grab_frame()
-        
-    # plotting: rescale the final frame to focus on the converged solution
-    if animate_plot == True:
-        plt.subplot(1,2,1)
-        plt.ylim(min_final-white_space,max_final+white_space)
-    
-    # plotting: save an image of the final frame
-    print 'saving final image...'
-    plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
-    
-    # free memory used for the plot
-    plt.close(fig)  
-    
-    ###########################################################################
     # [time spectral] Gauss-Seidel analogy w/ variable pseudo-timestep ########
     ###########################################################################    
     import random
     
-    max_sweeps = 30000          # max number of Gauss-Seidel sweeps to try
-    init_value = 5.5             # constant intital guess
-    delta_tau_init = 0.001       # pseudo-timestep
-    adjust_delta_tau = True      # allow pseudo-time to change during run
+    adjust_delta_tau = False      # allow pseudo-time to change during run
+    delta_tau_init = 0.0927       # pseudo-timestep
+    #delta_tau_init = 0.0001
+    
+    max_sweeps = 1000000          # max number of Gauss-Seidel sweeps to try
+    init_value = 100            # constant intital guess
     conv_criteria = 1e-4         # resdiual convergence criteria
     
     # Initialize lists
@@ -1093,7 +930,6 @@ def main():
     # begin the Gauss-Seidel sweeps. (N.B. One sweep corresponds to each row
     # having been advanced by ONE pseudo-timestep!)
     for sweep in range(max_sweeps): 
-        
         # set the old solution        
         if sweep == 0:
             # for first sweep, set intial guess for periodic solution
@@ -1107,16 +943,13 @@ def main():
         
         # record the pseudo-timestep to be used for this sweep
         delta_tau_hist.append(delta_tau)
-        
         # clear the new solution holder
         f_TS_new = []
         
         # perform one sweep (one pseudo-time step) down the rows       
-        for i in range(N):
-            
+        for i in range(N):    
             # rename/isolate the solution of the current row
-            f_TS_i = f_TS_old[i]
-            
+            f_TS_i = f_TS_old[i]    
             # compute the source term for this row
             rows_above = 0
             for j in range(i):
@@ -1128,14 +961,12 @@ def main():
             row_source =  rows_above + diag_source + rows_below
             
             # compute dfdt for this row from the ODE
-            dfdt_i = myPeriodicODE(t[i], T, f_TS_old[i])
-            
+            dfdt_i = myPeriodicODE(t[i], T, f_TS_old[i])            
             # calculate the residual for this pseudo-iteration
             row_residual = dfdt_i - row_source
             
             # update the solution at this time instance
-            f_TS_i += delta_tau*row_residual
-            
+            f_TS_i += delta_tau*row_residual            
             # store the updated solution for this row
             f_TS_new.append(f_TS_i)
         
@@ -1154,52 +985,64 @@ def main():
               'residual = ', res_hist[sweep], '; delta_tau = ', delta_tau
         # check residual stopping condition
         if res_hist[sweep] < conv_criteria:
-            print '\n\tsolution found. (', sweep, 'sweeps required )\n'
+            print '\n\tsolution found. (', sweep+1, 'sweeps required )'
+            print '\t[intial guess: constant solution at', init_value,']\n'
             break
         else:
             # adjust the pseudo-timestep
-            if adjust_delta_tau == True and sweep > 0:
+            if adjust_delta_tau == True and sweep > 1:
                 current_res = res_hist[sweep]
-                previous_res = res_hist[sweep-1]
+                previous_res = res_hist[sweep-2]
                 ratio = previous_res/current_res                      
                 #sol_diff = abs(f_TS_i-f_TS_i_old)
                 #ratio = int(res_ratio)+1.2*(res_ratio%1)
                 scaling_fac = 1.0
                 delta_tau_new = delta_tau*scaling_fac*ratio
                 #if delta_tau_new > delta_tau_init:
-                #    delta_tau = delta_tau_new
+                delta_tau = delta_tau_new
                 
                 # switch to initial value
                 if ratio < 1.0:
                     delta_tau = delta_tau_init
                 else:
                     delta_tau = delta_tau_new
-                '''               
-                # limit slope 
-                delta_tau_slope = (delta_tau_new-delta_tau)/1.0   # 1 sweep
-                if delta_tau_slope > 1.0:
-                    delta_tau = delta_tau
-                else:
-                    delta_tau = delta_tau_new
-               '''
+                               
+                ## limit slope 
+                #delta_tau_slope = (delta_tau_new-delta_tau)/1.0   # 1 sweep
+                #if delta_tau_slope > 1.0:
+                #    delta_tau = delta_tau
+                #else:
+                #    delta_tau = delta_tau_new
+               
                 
     # plotting: user input! do you want to animate the solution history or just
     # plot the final result? (True = animate, False = just print final result)
-    animate_plot = True                    
-    plot_name = 'TS Gauss-Seidel variable step'
+    animate_plot = True                  
     n_images = sweep+1
-    skip_images = 1200
+    skip_images = n_images/15
     
     # plotting: initializations and sizing
     fig = plt.figure()
+    guess_ext = ' - guess - '+str(init_value).replace('.',',')
+    if adjust_delta_tau == True:
+        stretch = 2.5
+        plots = 3
+        res_plot_title = ' '
+        plot_name = 'TS G-S variable step' + guess_ext
+    else:
+        stretch = 2.0
+        plots = 2
+        res_plot_title = r'$\Delta\tau = '+str(delta_tau)+'$'
+        dTau_ext = str(delta_tau_init).replace('.',',')
+        plot_name = 'TS G-S constant step - ' + dTau_ext + guess_ext
     xdim, ydim = plt.gcf().get_size_inches()
-    plt.gcf().set_size_inches(2.5*xdim, ydim, forward=True)
+    plt.gcf().set_size_inches(stretch*xdim, ydim, forward=True)
 
     # plotting: things that will not be changing inside the loop
     plt.rc('text', usetex=True)               # for using latex
     plt.rc('font', family='serif')            # setting font
     # solution history plot
-    plt.subplot(1,3,1)
+    plt.subplot(1,plots,1)
     dots, = plt.plot([], [],'ko',label='$f_{TS}$')
     line, = plt.plot([], [],'k--',label='$ Fourier \, interp.$')
     plt.xlabel(r'$t$', fontsize=18)
@@ -1217,28 +1060,30 @@ def main():
     else:
         plt.ylim(min_final-white_space,max_final+white_space)
     # residual history plot
-    plt.subplot(1,3,2)
+    plt.subplot(1,plots,2)
     res, = plt.semilogy([], [],'b-',label='residual')
     plt.xlabel(r'$Gauss\textnormal{-}Seidel \, sweep$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
+    plt.title(res_plot_title)
     plt.xlim(0,sweep)
     min_power = int(math.log(min(res_hist),10))-1
     max_power = int(math.log(max(res_hist),10))+1
     plt.ylim(pow(10,min_power), pow(10,max_power))
     # pseudo-timestep history plot
-    plt.subplot(1,3,3)
-    dTau, = plt.plot([],[],'r-')
-    plt.xlabel(r'$Gauss\textnormal{-}Seidel \, sweep$', fontsize=18)
-    plt.ylabel(r'$\Delta\tau$', fontsize=18)
-    plt.xlim(0,sweep)
-    min_dTau = min(delta_tau_hist)
-    max_dTau = max(delta_tau_hist)
     if adjust_delta_tau == True:
-        ampl_dTau = abs(max_dTau-min_dTau)
-        white_space = ampl_dTau/4.0
-    else:
-        white_space = delta_tau_init
-    plt.ylim(min_dTau-white_space,max_dTau+white_space)
+        plt.subplot(1,plots,3)
+        dTau, = plt.plot([],[],'r-')
+        plt.xlabel(r'$Gauss\textnormal{-}Seidel \, sweep$', fontsize=18)
+        plt.ylabel(r'$\Delta\tau$', fontsize=18)
+        plt.xlim(0,sweep)
+        min_dTau = min(delta_tau_hist)
+        max_dTau = max(delta_tau_hist)
+        if adjust_delta_tau == True:
+            ampl_dTau = abs(max_dTau-min_dTau)
+            white_space = ampl_dTau/4.0
+        else:
+            white_space = delta_tau_init
+        plt.ylim(min_dTau-white_space,max_dTau+white_space)
     # plotting: set the total number of frames
     if animate_plot == True:
         # capture all frames (skipping, if necessary) and the final frame
@@ -1253,18 +1098,19 @@ def main():
         frame = 0
         for n in all_frames:
             # plot solution and interpolation
-            plt.subplot(1,3,1)
+            plt.subplot(1,plots,1)
             dots.set_data(t,f_TS_hist[n])
             t_int,f_TS_int, dummy1 = fourierInterp(t,f_TS_hist[n])
             line.set_data(t_int,f_TS_int)
             plt.title(r'$sweep \,\#$'+'$'+str(n+1)+'$') # might need adjusting
             plt.legend(loc='best')
             # plot residual            
-            plt.subplot(1,3,2)
+            plt.subplot(1,plots,2)
             res.set_data(range(n),res_hist[:n])
             # plot pseudo-timestep
-            plt.subplot(1,3,2)
-            dTau.set_data(range(n),delta_tau_hist[:n])
+            if adjust_delta_tau == True:
+                plt.subplot(1,plots,3)
+                dTau.set_data(range(n),delta_tau_hist[:n])
             # progress monitor
             frame += 1
             percent_done = float(n)*100.0/(n_images-1)
@@ -1275,7 +1121,7 @@ def main():
         
     # plotting: rescale the final frame to focus on the converged solution
     if animate_plot == True:
-        plt.subplot(1,3,1)
+        plt.subplot(1,plots,1)
         plt.ylim(min_final-white_space,max_final+white_space)
     
     # plotting: save an image of the final frame
@@ -1285,41 +1131,8 @@ def main():
     
     # free memory used for the plot
     plt.close(fig)
-'''    
 
-                    # adjust the pseudo-timestep
-                    if iteration > 0:
-                        current_res = row_residual_hist[iteration]
-                        previous_res = row_residual_hist[iteration-1]
-                        res_ratio = previous_res/current_res                      
-                        sol_diff = abs(f_TS_i-f_TS_i_old)
-                        #if iteration < 120 and iteration > 80 and i == 3:
-                        #if iteration > 45000 and i == 2:
-                        #if iteration%print_every == 0:
-                        if res_ratio < 1.0 and print_count < 7:
-                            printing = True
-                            print_count += 1
-                            print 'current_res = ', current_res
-                            print 'previous_res =', previous_res  
-                            print 'res_ratio = ', previous_res/current_res
-                            print 'sol_diff = ', sol_diff
-                            print 'delta_tau = ', delta_tau
-                        else:
-                            printing = False
-                        #if delta_tau >= 1.0:
-                         #   delta_tau_new = delta_tau*(1.0/res_ratio)
-                        #else:
-                         #   delta_tau_new = delta_tau*(1.0*res_ratio)
-                        ratio = int(res_ratio)+1.2*(res_ratio%1)
-                        delta_tau_new = delta_tau*ratio
-                        if delta_tau_new > delta_tau_init:
-                            delta_tau = delta_tau_new
-                        if delta_tau > 2.0:
-                            delta_tau = delta_tau_init
-                    
-'''
-        
-        
+
 
     
 
