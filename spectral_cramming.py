@@ -40,7 +40,10 @@ def my_dft(f, freqs=[-1.5]):
 
 
 # zoom percentage for the frequency domain plots
-zoom_percent = 100
+zoom_percent = 10
+
+# x-axis of frequency plot
+freq_axis = 's'    # ('omega' OR 's') 
 
 # number of sample points
 N = pow(2,8)
@@ -48,8 +51,15 @@ N = pow(2,8)
 # the signal
 T = 2.0
 t = np.linspace(0,T,N)
-f = np.sin(2.0*np.pi*2.3*t/T) \
-  + np.cos(2.0*np.pi*4.7*t/T)
+f = np.sin(2.0*np.pi*2.0*t/T) \
+  + np.cos(2.0*np.pi*5.0*t/T) #  + np.sin(2.0*np.pi*80.0*t/T)
+
+# the angular frequency
+angular_frequency = 2.0*np.pi/T
+
+# specific frequencies
+specific_frequencies = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+#specific_frequencies = [angular_frequency, 2*angular_frequency]
 
 # the DFT
 #F_f = np.fft.fft(f)
@@ -58,7 +68,14 @@ F_f = my_dft(f)
 # plot the DFT
 freq_max = int((zoom_percent/100.0)*N)
 freq = list(range(0,freq_max))
-
+if freq_axis == 's':
+    freq_label = '$s$'
+    F_label = '$\|Ff(s)\|^2$'
+if freq_axis == 'omega':
+    freq = [entry/angular_frequency for entry in freq]
+    freq_label = '$\omega$'
+    F_label = '$\|Ff(\omega)\|^2$'
+    
 # compute the inverse DFT
 F_inv_F = np.fft.ifft(F_f)
 
@@ -72,10 +89,10 @@ plt.ylabel('$f(t)$')
 # plot the frequency domain
 plt.figure(2)
 plt.clf()
-plt.plot(freq,np.absolute(F_f[0:freq_max]),'ko')
-plt.vlines(freq,np.zeros(len(freq)),np.absolute(F_f[0:freq_max]))
-plt.xlabel('$\omega$')
-plt.ylabel('$\|Ff(\omega)\|$')
+plt.plot(freq,np.power(np.absolute(F_f[0:freq_max]),2),'ko')
+plt.vlines(freq,np.zeros(len(freq)),np.power(np.absolute(F_f[0:freq_max]),2))
+plt.xlabel(freq_label)
+plt.ylabel(F_label)
 
 # plot the complex frequency domain
 plt.figure(3)
@@ -84,7 +101,7 @@ plt.plot(freq, F_f.real[0:freq_max], 'bo', label='real')
 plt.vlines(freq,np.zeros(len(freq)),F_f.real[0:freq_max])
 plt.plot(freq, F_f.imag[0:freq_max], 'ro', label='imaginary')
 plt.vlines(freq,np.zeros(len(freq)),F_f.imag[0:freq_max])
-plt.xlabel('$\omega$')
+plt.xlabel(freq_label)
 plt.ylabel('$Ff$')
 plt.legend(loc='best')
 
@@ -103,7 +120,7 @@ print('N = ', N)
 ###############################################################################
 
 # DFT with only certain frequencies
-freqs = np.array([2.0, 5.0])
+freqs = np.array(specific_frequencies)
 short_F_f = my_dft(f, freqs=freqs)
 
 # create a full spectrum by adding zeros at the frequencies that weren't used
@@ -128,14 +145,18 @@ else:
 # IDFT of the resulting spectrum
 F_inv_full_F_f = np.fft.ifft(full_F_f)
 
+# rescale freqs
+if freq_axis == 'omega':
+    freqs = np.divide(freqs, angular_frequency)
+    
 # plot the absolute value of the short frequency domain
 plt.figure(5)
 plt.clf()
-plt.plot(freqs,np.absolute(short_F_f),'ko')
-plt.vlines(freqs,np.zeros(len(freqs)),np.absolute(short_F_f))
+plt.plot(freqs,np.power(np.absolute(short_F_f),2),'ko')
+plt.vlines(freqs,np.zeros(len(freqs)),np.power(np.absolute(short_F_f),2))
 plt.plot(0,0,'w.')
-plt.xlabel('$\omega$')
-plt.ylabel('$\|Ff(\omega)\|$')
+plt.xlabel(freq_label)
+plt.ylabel(F_label)
 plt.xlim(0,max(freqs)+min(freqs))
 
 # plot the real and imaginary components of the new frequency domain
@@ -146,7 +167,7 @@ plt.vlines(freqs,np.zeros(len(freqs)),short_F_f.real[0:freq_max])
 plt.plot(freqs, short_F_f.imag[0:freq_max], 'ro', label='imaginary')
 plt.vlines(freqs,np.zeros(len(freqs)),short_F_f.imag[0:freq_max])
 plt.plot(np.linspace(0,max(freqs)+min(freqs)),np.zeros(50),'k--')
-plt.xlabel('$\omega$')
+plt.xlabel(freq_label)
 plt.ylabel('$Ff$')
 plt.xlim(0,max(freqs)+min(freqs))
 plt.legend(loc='best')
@@ -156,8 +177,8 @@ plt.figure(7)
 plt.clf()
 plt.plot(freq,np.absolute(full_F_f[0:freq_max]),'ko')
 plt.vlines(freq,np.zeros(len(freq)),np.absolute(full_F_f[0:freq_max]))
-plt.xlabel('$\omega$')
-plt.ylabel('$\|Ff(\omega)\|$')
+plt.xlabel(freq_label)
+plt.ylabel(F_label)
 
 # plot the reconstructed signal in the time domain
 plt.figure(8)

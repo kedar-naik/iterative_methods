@@ -44,7 +44,6 @@ def time_spectral_operator(N,T):
                               (1/math.sin(math.pi*(i-j)/N))
     return D
 
-
 # this function returns the value of a user-defined function ##################
 def myPeriodicSignal(t,T):
     """
@@ -60,12 +59,7 @@ def myPeriodicSignal(t,T):
     """
     import math
   
-    # Type in your analytical function and dervatives here:
-    #f = [pow(math.sin(2*math.pi*t_i/T),3)+pow(math.cos(2*math.pi*t_i/T),3)+9 \
-     #    for t_i in t]
-    #dfdt = [(-1/T)*(3*math.pi*math.sin(4*math.pi*t_i/T)* \
-      #    (math.cos(2*math.pi*t_i/T) - math.sin(2*math.pi*t/T))) for t_i in t] 
-  
+    # Type in your analytical function and dervatives here:  
     f = [math.sin(2*math.pi*t_i/T)+9 for t_i in t]
     dfdt = [(2*math.pi/T)*math.cos(2*math.pi*t_i/T) for t_i in t]
     
@@ -81,7 +75,6 @@ def myPeriodicSignal(t,T):
         name = r'f(t)=cos(\pi t)'
     
     return (f, dfdt, df2dt2, name)
-  
   
 # this function returns the value of a user-defined 1st-order ODE ############
 def myPeriodicODE(t,T,u):
@@ -99,10 +92,14 @@ def myPeriodicODE(t,T,u):
     import math
     
     # The equation for periodic population harvesting
-    k = 0.5                   # growth rate of the population
+    k = 0.5                   # growth rate of population (Malthusian param.)
     C = 10                    # carrying capacity
     h = 0.5                   # determines total rate of periodic harvesting
     b = 2*math.pi/T           # b = 2*pi/period of the sinusoidal function
+    
+    # messing with the period!
+    T_real = 10.3
+    b = 2*math.pi/T_real      # b = 2*pi/period of the sinusoidal function
     
     dudt = k*u*(1-(u/C)) - h*(1+math.sin(b*t))
     dudt = k*u*(1-(u/C)) - h*(1+math.sin(b*t)*math.cos(b*t)**4.0)
@@ -239,7 +236,6 @@ def fourierInterp(x, y, x_int=None):
                             a[j+1]*math.sin((j+1)*scaled_x_int))
     
     return (x_int, y_int, dydx_int)
-    
 
 # this function linearly interpolates a series of points ######################
 def linearInterp(x, y, x_int=None):
@@ -371,7 +367,7 @@ def extractPeriod(t,f):
     while len(indices_maxes) < other_points+1:
         indices_maxes = [i for i in range(n) if f_clean[i] > max_f-tol]
         tol *= 2.0
-        
+    
     # now find the other points closest to the minimum
     tol = 1e-8
     indices_mins = []
@@ -471,7 +467,7 @@ def extractPeriod(t,f):
     # plotting: save image
     plot_name = 'period extraction process'
     print '\nsaving image...'
-    plt.savefig(plot_name, dpi=500)
+    plt.savefig(plot_name, dpi=300)
     print 'figure saved: ' + plot_name
     #plotting: free memory
     plt.close()
@@ -543,6 +539,7 @@ def main():
     matplotlib.use('Agg')                    # use Anti-Grain Geometry backend
     from matplotlib import pylab as plt      # must be called AFTER use()
     from matplotlib import animation         # for specifying the writer
+    
 
     # close open windows
     plt.close('all')
@@ -550,13 +547,13 @@ def main():
     # user inputs
     N = 17                  # number of time instaces
     T = 2*math.pi          # period of osciallation (enter a float!)
-    T=2.0
+    T = 2.0
     
     # create the time-spectral operator 
     D = time_spectral_operator(N,T)
     
     # time interval
-    delta_T = T/N
+    delta_T = float(T)/N
          
     # indices corresponding to the time instances
     indices = range(N)
@@ -597,7 +594,7 @@ def main():
     f_fine, dfdt_fine, df2dt2_fine, name = myPeriodicSignal(t_fine,T)
     
     # plotting: USER INPUT. Would you like to plot this verification figure?
-    plot_figure = True
+    plot_figure = False
     plot_name = 'TS verification'
     
     if plot_figure == True:
@@ -632,9 +629,9 @@ def main():
     ###########################################################################
     # [time accurate] explicit euler ##########################################
     ###########################################################################
-    delta_t = 0.05            # time step
-    initial_value = 8        # intitial condition
-    t_end = 25               # final time
+    delta_t = 0.05             # time step
+    initial_value = 8.0        # intitial condition
+    t_end = 95                 # final time
   
     f = []
     times = []
@@ -666,8 +663,9 @@ def main():
     plt.rc('font', family='serif')            # setting font
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f(t)$', fontsize=18)
-    plt.xlim(0,20)
-    plt.ylim(7.8,9.0)
+    plt.xlim(0,t_end)
+    vertical_padding = (max(f)-min(f))/4.0
+    plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
     plt.title(r'$\Delta t = \,$'+str(delta_t))
     
     # plotting: set the total number of frames
@@ -719,28 +717,76 @@ def main():
                 r'time-accurate result}$')
     plot_name = 'isolated period extracted'
     print 'saving image...'
-    plt.savefig(plot_name, dpi=500)
+    plt.savefig(plot_name, dpi=300)
     print 'figure saved: ' + plot_name
     plt.close()
     
     ###########################################################################
     # [time spectral] explict pseudo-timestepping (dfdt -> f) #################
     ###########################################################################
-    delta_tau = 0.0001            # pseudo-timestep
-    init_value = 8.0             # constant intital guess
-    max_pseudosteps = 500000      # maximum number of pseudo-timesteps to try
-    conv_criteria = 1e-4         # resdiual convergence criteria
+    
+    # MESSING WITH THE PERIOD AND THE OPERATOR MATRIX!!!
+    # (Note that when the period is wrong, so are the associated time instances)
+    wrong_period = False # (only used for plotting)
+    adjust_period = False
+    T = 11.0
+    
+    # create the time-spectral operator 
+    D = time_spectral_operator(N,T)    
+    # time interval
+    delta_T = float(T)/N         
+    # indices corresponding to the time instances
+    indices = range(N)         
+    # list of time instances
+    t = [delta_T*index for index in indices]
+    
+    # pseudo-timestep size (residual)
+    delta_tau = 0.00191            # pseudo-timestep (optimal for guess=100)
+    delta_tau = 0.00005
+    
+    # pseudo-timestep size (period)
+    delta_tau_T = 0.01    # pseudo-timestep for driving the period
+    
+    init_value = 100.0           # constant intital guess
+    max_pseudosteps = 2000000     # maximum number of pseudo-timesteps to try
+    
+    import sys                               # for getting machine zero value
+    machine_zero = sys.float_info.epsilon
+    my_machine_zero = 3.47605031684e-11     # T = 2.0
+    my_machine_zero = 3.54063857616e-11     # T = 2.5
+    my_machine_zero = 3.55316119477e-11     # T = 3.0
+    my_machine_zero = 3.40277508912e-11     # T = 1.5
+    my_machine_zero = 3.00822747148e-11     # T = 1.0
+    my_machine_zero = 3.45649060659e-11     # T = 1.75
+    my_machine_zero = 3.51394994588e-11     # T = 2.25
+    
+    conv_criteria = 1e1          # resdiual convergence criteria
+    #conv_criteria = my_machine_zero         # resdiual convergence criteria
     
     # Initialize history lists
     res_hist = []                # residual history
     f_TS_hist =[]                # solution history
-    
+    if adjust_period == True:
+        T_hist = []              # period history
+        T_hist.append(T)
+ 
     # set the intial guess for the periodic solution
     f_TS = [init_value for index in indices]    # N.B. f_TS is being reassigned
-    f_TS_hist.append(f_TS)   
+    f_TS_hist.append(f_TS)
     
     # pseudo-timestepping
     for iteration in range(max_pseudosteps):
+        
+        # if adjusting period, recompute the matrix and the time instances
+        if adjust_period == True:
+            # create the time-spectral operator 
+            D = time_spectral_operator(N,T)    
+            # time interval
+            delta_T = float(T)/N         
+            # indices corresponding to the time instances
+            indices = range(N)         
+            # list of time instances
+            t = [delta_T*index for index in indices]
                 
         # compute D*f
         Df = myMult(D,f_TS)
@@ -755,8 +801,28 @@ def main():
         res_hist.append(myNorm(res))
         
         # print new residual to the screen
-        print 'pseudo-time iteration #',iteration, \
-              '; residual = ',res_hist[iteration]
+        if adjust_period == True:
+            print 'pseudo-time iteration #',iteration, \
+                  '; residual = '+str(res_hist[iteration]), \
+                  '; T = ', T
+        else:
+            print 'pseudo-time iteration #',iteration, \
+                  '; residual = '+str(res_hist[iteration])
+              
+        # if adjusting period, then find gradient of residual w.r.t. period
+        # and use it to compute a new period
+        if adjust_period == True:
+            # GOPINATH: compute "figure of merit" (NOT the residual)
+            # N.B. Here, R from the paper is -df/dt
+            I = [Df[index]-dfdt[index] for index in indices]
+            # compute gradient of the square of the "figure of merit"
+            grad_I2_wrt_T = [(-2.0/T)*I[index]*Df[index] for index in indices]
+            # compute the average of these gradients
+            ave_grad_I2_wrt_T = sum(grad_I2_wrt_T)/float(len(grad_I2_wrt_T))
+            # using the same pseudo timestep as for the solution vector
+            T = T - delta_tau_T*ave_grad_I2_wrt_T
+            # append this to the period history
+            T_hist.append(T);
         
         # check residual stopping condition
         if res_hist[iteration] < conv_criteria:
@@ -859,6 +925,19 @@ def main():
     # free memory used for the plot
     plt.close(fig)
     
+    # [HACK] plot the stalled residual values vs. the period
+    if adjust_period:
+        plot_name = 'T_vs_iter'
+        plt.figure()
+        plt.plot(range(len(T_hist)), T_hist, 'k.-')
+        plt.plot(range(len(T_hist)), [2.0]*len(T_hist), 'r--')
+        plt.xlabel(r'$iteration$', fontsize=18)
+        plt.ylabel(r'$T$', fontsize=18)
+        print 'saving figure...'
+        plt.savefig(plot_name, dpi=500)
+        print 'figure saved: ' + plot_name
+        plt.close()
+        
     ###########################################################################
     # compare the time-spectral results against the time-accurate one #########
     ###########################################################################
@@ -891,7 +970,10 @@ def main():
     # plot boths isolated periods atop one another
     plt.figure()
     # plot the extracted time-accurate period
-    plt.plot(t_int_comp,f_period_opt,'b-', label=r'$\textit{time-accurate}$')
+    if wrong_period:
+        plt.plot(t_period,f_period,'b-',label=r'$\textit{time-accurate}$')
+    else:
+        plt.plot(t_int_comp,f_period_opt,'b-', label=r'$\textit{time-accurate}$')
     # plot the interpolated time-spectral solution
     plt.plot(t,f_TS_hist[-1],'ko')
     plt.plot(t_int_comp, f_TS_int_comp,'k--', \
@@ -901,21 +983,23 @@ def main():
     matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{mathtools}"]
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f(t)$', fontsize=18)
+    #if wrong_period:
+    #    plt.ylim(8.84,8.91)
     plt.legend(loc='best')
     plot_name = 'comparison - TS vs TA'
     print 'saving image...'
     plt.savefig(plot_name, dpi=500)
     print 'figure saved: ' + plot_name
     plt.close()
-    
+'''
     ###########################################################################
     # [time spectral] Gauss-Seidel analogy w/ variable pseudo-timestep ########
     ###########################################################################    
     import random
     
     adjust_delta_tau = False      # allow pseudo-time to change during run
-    delta_tau_init = 0.0927       # pseudo-timestep
-    #delta_tau_init = 0.0001
+    delta_tau_init = 0.0927       # pseudo-timestep (optimal for guess=100)
+    delta_tau_init = 0.01
     
     max_sweeps = 1000000          # max number of Gauss-Seidel sweeps to try
     init_value = 100            # constant intital guess
@@ -1017,7 +1101,7 @@ def main():
                 
     # plotting: user input! do you want to animate the solution history or just
     # plot the final result? (True = animate, False = just print final result)
-    animate_plot = True                  
+    animate_plot = False                  
     n_images = sweep+1
     skip_images = n_images/15
     
@@ -1131,7 +1215,7 @@ def main():
     
     # free memory used for the plot
     plt.close(fig)
-
+'''
 
 
     
