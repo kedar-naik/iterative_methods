@@ -1049,8 +1049,8 @@ def main():
     if plot_figure == True:
         # plotting
         print('\nplotting fig. ' + plot_name + '...')
-        #plt.rc('text', usetex=True)               # for using latex
-        #plt.rc('font', family='serif')            # setting font
+        plt.rc('text', usetex=True)               # for using latex
+        plt.rc('font', family='serif')            # setting font
         # plot the "exact" results
         plt.plot(t_fine,f_fine,'k-',label='$f$')
         plt.plot(t_fine,dfdt_fine,'r-',label='$df/dt$')
@@ -1113,8 +1113,8 @@ def main():
     l, = plt.plot([], [],'k-',label='f')
 
     # plotting: things that will not be changing inside the loop
-    #plt.rc('text', usetex=True)               # for using latex
-    #plt.rc('font', family='serif')            # setting font
+    plt.rc('text', usetex=True)               # for using latex
+    plt.rc('font', family='serif')            # setting font
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f(t)$', fontsize=18)
     plt.xlim(0,t_end)
@@ -1135,7 +1135,7 @@ def main():
     with writer.saving(fig, plot_name+'.mp4', 100):
         frame = 0
         for n in all_frames:
-            l.set_data(times[:n+1],f[:n+1])
+            plt.plot(times[:n+1],f[:n+1])
             # progress monitor
             percent_done = float(n)*100.0/(n_images-1)
             print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
@@ -1568,8 +1568,8 @@ def main():
     #plt.rc('font', family='serif')            # setting font
     # solution history plot
     plt.subplot(1,n_plots,1)
-    dots, = plt.plot([],[],'ko',label='$f_{TS}$')
-    line, = plt.plot([],[],'k--',label='$ Fourier \, interp.$')
+    #dots, = plt.plot([],[],'ko',label='$f_{TS}$')
+    #line, = plt.plot([],[],'k--',label='$ Fourier \, interp.$')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$f\left(t\right)$', fontsize=18)
     plt.legend(loc='upper right')
@@ -1589,8 +1589,8 @@ def main():
         plt.ylim(start, finish)
     # residual history plot
     plt.subplot(1,n_plots,2)
-    res, = plt.semilogy([],[],'b-',label='TS residual')
-    bdf_res, = plt.semilogy([],[],'g-',label='BDF residual')
+    #res, = plt.semilogy([],[],'b-',label='TS residual')
+    #bdf_res, = plt.semilogy([],[],'g-',label='BDF residual')
     plt.xlabel(r'$iteration$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
     plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
@@ -1601,7 +1601,7 @@ def main():
     # period history plot
     if period_plot:
         plt.subplot(1,n_plots,3)
-        per, = plt.plot([],[],'r-')
+        #per, = plt.plot([],[],'r-')
         plt.plot(list(range(iteration)),[T_actual]*iteration,'k--',label='$T_{actual}$')
         plt.xlabel(r'$iteration$', fontsize=18)
         plt.ylabel(r'$T$', fontsize=18)
@@ -1625,9 +1625,9 @@ def main():
             # plot solution and interpolation
             plt.subplot(1,n_plots,1)
             t_plot = [(float(T_hist[n])/N)*index for index in indices]
-            dots.set_data(t_plot,f_TS_hist[n])
+            plt.plot(t_plot,f_TS_hist[n],'ko',label='$f_{TS}$')
             t_int,f_TS_int, dummy1 = fourierInterp(t_plot,f_TS_hist[n])
-            line.set_data(t_int,f_TS_int)
+            plt.plot(t_int,f_TS_int,'k--',label='$ Fourier \, interp.$')
             plt.xlim(0,T_hist[n])
             plt.ylim(min(f_TS_hist[n])-white_space,max(f_TS_hist[n])+white_space)
             if period_plot:
@@ -1637,16 +1637,15 @@ def main():
             #plt.legend(loc='best')
             # plot residual            
             plt.subplot(1,n_plots,2)
-            res.set_data(list(range(n)),res_hist[:n])
+            plt.plot(list(range(n)),res_hist[:n],'b-',label='TS residual')
             if compare_to_bdf:
-                bdf_res.set_data(list(range(n)),res_bdf_hist[:n])
+                plt.plot(list(range(n)),res_bdf_hist[:n])
                 plt.legend(loc='best')
             # plot period
             if period_plot:
                 plt.subplot(1,n_plots,3)
-                per.set_data(list(range(n)),T_hist[:n])
+                plt.plot(list(range(n)),T_hist[:n],'r-')
                 plt.xlim(0,iteration)
-                plt.legend(loc='best')
             # progress monitor
             frame += 1
             percent_done = float(n)*100.0/(n_images-1)

@@ -87,7 +87,6 @@ plt.rc('text', usetex=True)
 plt.rc('font', family='serif')
 plt.close('all')
 fig = plt.figure()
-l, = plt.plot([], [],'k.-',label='u')
 # plotting: things that will not be changing inside the loop
 u_min = 1e10
 u_max = -1e10
@@ -98,7 +97,9 @@ for u_sol in u_hist:
         if u_i < u_min:
             u_min = u_i
 vertical_padding = (u_max-u_min)/4.0
-plt.ylim(u_min-vertical_padding,u_max+vertical_padding)
+plt.xlabel('$x$', fontsize=18)
+plt.ylabel('$u(x,t)$', fontsize=18)
+
 # plotting: set the total number of frames
 if animate_plot == True:
     # capture all frames (skipping, if necessary) and the final frame
@@ -108,14 +109,12 @@ else:
     all_frames = [n_images-1]
 # plotting: capturing the movie
 writer = animation.writers['ffmpeg'](fps=15)
-with writer.saving(fig, plot_name+'.mp4', 100):
+with writer.saving(fig, plot_name+'.mp4', 300):
     frame = 0
     for n in all_frames:
-        plt.clf()
-        plt.plot(x,u_hist[n],'k.-')  
-        plt.xlabel('$x$', fontsize=18)
-        plt.ylabel('$u(x,t)$', fontsize=18)
-        plt.xlim(x_start,x_end)
+        # clear the previous line and make the new plot
+        plt.cla()
+        plt.plot(x,u_hist[n],'k.-')
         plt.ylim(u_min-vertical_padding,u_max+vertical_padding)
         plt.title('$'+r'\frac{\partial u}{\partial t} = -v \frac{\partial u}{\partial x} \quad CFL = '+str(round(CFL,2))+'\quad t = '+str(round(t_hist[n],2))+'s$')
         # Make room for the ridiculously large title.
@@ -140,5 +139,3 @@ print('\tdelta_t = ', delta_t)
 print('\tv = ', v)
 print('\tCFL = ', CFL)
 
-
- 
