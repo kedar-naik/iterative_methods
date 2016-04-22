@@ -108,16 +108,16 @@ def harmonic_balance_operator(omegas):
     delta_t = T_lowest_omega/N
     t_HB = np.array([i*delta_t for i in range(N)])
     # create a list of all N discrete frequencies
-    # f = [0, f_1, ..., f_K, -f_K, ..., -f_1]
-    f = [0]+omegas+[-omegas[-(i+1)] for i in range(K)]
+    # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
+    w = [0]+omegas+[-omegas[-(i+1)] for i in range(K)]
     # create the diagonal matrix holding the frequencies
-    f_imag = [1j*f_i for f_i in f]
-    D = np.diag(f_imag)
+    w_imag = [1j*w_i for w_i in w]
+    D = np.diag(w_imag)
     # create the forward-transform matrix, E
     E_inv = np.zeros([N,N], dtype=np.complex_)
     for i in range(N):
         for j in range(N):
-            E_inv[i][j] = np.exp(1j*f[j]*t_HB[i])
+            E_inv[i][j] = (1/N)*np.exp(1j*w[j]*t_HB[i])
     # take the inverse of the matrix E
     E = np.linalg.inv(E_inv)
     # compute the operator (D_HB = E_inv*D*E)
@@ -310,8 +310,10 @@ plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega
 #####################################################################
 # See how condition number varies with selected angular frequencies #
 #####################################################################
-first_omega = 1.5
-second_omegas = myLinspace(1.0,5.0,401)
+first_omega = 3.3
+second_omega_start = first_omega
+second_omega_end = first_omega+46
+second_omegas = myLinspace(second_omega_start,second_omega_end,int((second_omega_end-second_omega_start)*100+1))
 # don't use arange! leads to floating-point errors!
 #second_omegas = np.arange(1.0, 2.6, 0.01)
 multiples = []
@@ -328,9 +330,9 @@ for second_omega in second_omegas:
         print('current multiple:', current_multiple)
         print('D_HB = ', D_HB)
         print('cond(D_HB) = ', current_cond)
-    #print('multiple: '+str(current_multiple)+'\tcond: '+str(current_cond))
+    print('multiple: '+str(current_multiple)+'\tcond: '+str(current_cond))
 peaks = [multiples[i] for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
-
+print('average+stdev = ',np.average(conds)+1*np.std(conds))
 peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
 #peaks = [str(np.floor(multiples[i]))[:-2]+'.'+str(Fraction(multiples[i]%np.floor(multiples[i]))) for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
 
@@ -338,7 +340,7 @@ plt.figure()
 plt.plot(multiples, conds, 'k.-')
 plt.xlabel('$\omega_2/\omega_1$', fontsize=16)
 plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
-plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$')
+plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$', fontsize=18)
 
 ##################################
 # [time accurate] explicit euler #
