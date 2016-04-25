@@ -10,6 +10,7 @@ import pylab as plt
 from time_spectral import myLinspace, myNorm
 from matplotlib import animation         # for specifying the writer
 import numpy as np
+plt.close('all')
 
 # angular frequencies in the underlying signal
 actual_omegas = [1.0, 3.0]
@@ -112,7 +113,7 @@ def harmonic_balance_operator(omegas):
     w = [0]+omegas+[-omegas[-(i+1)] for i in range(K)]
     # create the diagonal matrix holding the frequencies
     w_imag = [1j*w_i for w_i in w]
-    D = np.diag(w_imag)
+    C = np.diag(w_imag)
     # create the forward-transform matrix, E
     E_inv = np.zeros([N,N], dtype=np.complex_)
     for i in range(N):
@@ -120,9 +121,9 @@ def harmonic_balance_operator(omegas):
             E_inv[i][j] = (1/N)*np.exp(1j*w[j]*t_HB[i])
     # take the inverse of the matrix E
     E = np.linalg.inv(E_inv)
-    # compute the operator (D_HB = E_inv*D*E)
+    # compute the operator (D_HB = E_inv*C*E)
     # is always real...why?
-    D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [E_inv, D, E]))
+    D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [E_inv, C, E]))
     # return the operator matrix and the time instances
     return (D_HB, t_HB)
 #-----------------------------------------------------------------------------#
@@ -199,7 +200,24 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=None):
                             a[j+1]*math.sin(omegas[j+1]*x_int[i]))
     return (x_int, y_int, dydx_int)
 #-----------------------------------------------------------------------------#    
-
+def plot_eigenvalues(A):
+    '''
+    Plots the eigenvalues of the given matrix on the complex plane.
+    '''
+    import numpy as np
+    import pylab as plt
+    
+    eig_result = np.linalg.eig(A)
+    eigs = eig_result[0]
+    Re_parts = np.real(eigs)
+    Im_parts = np.imag(eigs)
+    plt.plot(Re_parts,Im_parts,'ko')
+    plt.xlabel('Re')
+    plt.ylabel('Im')
+    plt.axis('equal')
+    plt.title('$eig\\left(D_{HB}\\right)$')
+    plt.grid()
+#-----------------------------------------------------------------------------#
 #######################################
 # actual periods of the two solutions #
 #######################################
@@ -226,17 +244,18 @@ D_HB, t_HB = harmonic_balance_operator(omegas)
 print('omegas = ', omegas)
 print('D_HB = ', D_HB,'\n')
 print('cond(D_HB) =', np.linalg.cond(D_HB))
+plot_eigenvalues(D_HB)
+
 # [HB] checking to see if we can find time derivatives
 f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
 # multiply by the HB operator matrix 
 df_HB = np.dot(D_HB, f_HB)
 
 # plot everything
-plt.close('all')
 plt.figure()
 plt.plot(t, f, label='$f_{exact}$')
-plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
 plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
+plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
 plt.plot(t_HB, df_HB, 'go', label='$df/dt_{HB}$')
 t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
 plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
@@ -245,13 +264,12 @@ plt.ylabel('$f(t)$', fontsize=16)
 plt.legend(loc='best')
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
 
-
 ############################################################################
 # See how the error in the derivatives changes if the freqs used are wrong #
 ############################################################################
 
 # set the error range to study
-abs_percent_error = 95
+abs_percent_error = 75
 
 # initialize the set of percent errors to try 
 percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
@@ -259,10 +277,10 @@ percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent
 max_norm_sol_error = 0
 norm_sol_errors = []
 # find the interpolated HB derivative with the correct angular frequencies
-D_HB, t_HB = harmonic_balance_operator(actual_omegas)
-f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-df_HB = np.dot(D_HB, f_HB)
-t_HB_int, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
+D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas)
+f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+df_HB = np.dot(D_HB, f_HB_actual)
+t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
 # loop through the various errors to try
 for error_percentage in percent_errors:
     # set the wrong angular frequencies
@@ -271,9 +289,13 @@ for error_percentage in percent_errors:
     D_HB, t_HB = harmonic_balance_operator(omegas)
     f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
     df_HB = np.dot(D_HB, f_HB)
-    t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
+    t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
     # compute error of incorrect solution, using values at interpolation points
+    # just just the error in df
     sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
+    # compute distance on (t,df) plane    
+    sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
+    
     # find the l2-norm of the error
     norm_sol_error = myNorm(sol_error)
     norm_sol_errors.append(norm_sol_error)
@@ -285,7 +307,8 @@ for error_percentage in percent_errors:
 plt.figure()
 plt.plot(percent_errors, norm_sol_errors, 'k.-')
 plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
-plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
+#plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
+plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
 plt.tight_layout()
 # find the interpolated HB derivative with the most incorrect frequencies
@@ -297,7 +320,7 @@ t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
 # plot the correct derivative and the worst answer studied
 plt.figure()
 plt.plot(t, f, label='$f_{exact}$')
-plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
+plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
 plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
 plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
 t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,omegas)
@@ -310,37 +333,35 @@ plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega
 #####################################################################
 # See how condition number varies with selected angular frequencies #
 #####################################################################
-first_omega = 3.3
-second_omega_start = first_omega
-second_omega_end = first_omega+46
-second_omegas = myLinspace(second_omega_start,second_omega_end,int((second_omega_end-second_omega_start)*100+1))
-# don't use arange! leads to floating-point errors!
-#second_omegas = np.arange(1.0, 2.6, 0.01)
-multiples = []
+first_omega = 1.0
+starting_multiple = 1
+max_multiple = 5
+multiples = myLinspace(starting_multiple, max_multiple, 150*int(max_multiple-starting_multiple)+1)
+plot_nondim_omegas = False
+
 conds = []
-for second_omega in second_omegas:
+nondim_omegas = []
+for multiple in multiples:
+    second_omega = first_omega*multiple
     freqs = [first_omega, second_omega]
-    current_multiple = second_omega/first_omega
-    multiples.append(current_multiple)
+    nondim_omegas.append(2.0*(second_omega-first_omega)/(second_omega+first_omega))
     D_HB, t_HB = harmonic_balance_operator(freqs)
     current_cond = np.linalg.cond(D_HB)    
     conds.append(current_cond)
-    if abs(current_multiple - 2.5) < 0.0001:
-        print('freqs =', freqs)
-        print('current multiple:', current_multiple)
-        print('D_HB = ', D_HB)
-        print('cond(D_HB) = ', current_cond)
-    print('multiple: '+str(current_multiple)+'\tcond: '+str(current_cond))
-peaks = [multiples[i] for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
-print('average+stdev = ',np.average(conds)+1*np.std(conds))
-peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
-#peaks = [str(np.floor(multiples[i]))[:-2]+'.'+str(Fraction(multiples[i]%np.floor(multiples[i]))) for i in range(len(conds)) if conds[i] > np.average(conds)+3*np.std(conds)]
+    #print('multiple: '+str(multiple)+'\tcond: '+str(current_cond))
+peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+2*np.std(conds)]
+nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+2*np.std(conds)]
 
 plt.figure()
-plt.plot(multiples, conds, 'k.-')
-plt.xlabel('$\omega_2/\omega_1$', fontsize=16)
+if plot_nondim_omegas:
+    plt.semilogy(nondim_omegas, conds, 'k.-')
+    plt.xlabel('$\delta^*_{\omega_2}=2\,\\frac{\omega_2-\omega_1}{\omega_2+\omega_1}$', fontsize=16)
+    plt.title('$outliers \,\, at: \quad '+str(nondim_peaks)[1:-1]+'$', fontsize=18)
+else:
+    plt.semilogy(multiples, conds, 'k.-')
+    plt.xlabel('$\omega_2/\omega_1$', fontsize=16)
+    plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$', fontsize=18)
 plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
-plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$', fontsize=18)
 
 ##################################
 # [time accurate] explicit euler #
