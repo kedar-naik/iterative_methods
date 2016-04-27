@@ -13,7 +13,7 @@ import numpy as np
 plt.close('all')
 
 # angular frequencies in the underlying signal
-actual_omegas = [1.0, 3.0]
+actual_omegas = [1.5, 2.3]
 
 # angular frequencies input by the user to the HB method
 omegas = [1.0, 3.0]
@@ -109,11 +109,19 @@ def harmonic_balance_operator(omegas):
     delta_t = T_lowest_omega/N
     t_HB = np.array([i*delta_t for i in range(N)])
     # create a list of all N discrete frequencies
+    # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K] (yields singular matrix!)
+    #w = [-omegas[-(i+1)] for i in range(K)]+[0]+omegas
+    # w = [-w_K, ..., -w_1, w_1, ..., w_K, 0]
+    #w = [-omegas[-(i+1)] for i in range(K)]+omegas+[0]
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
     w = [0]+omegas+[-omegas[-(i+1)] for i in range(K)]
     # create the diagonal matrix holding the frequencies
     w_imag = [1j*w_i for w_i in w]
     C = np.diag(w_imag)
+    # try to create a preconditioner that has 1/C[i][i] along the diagonal, 
+    # except for the 0 entry at C[0][0]
+    #one_over_C_diag = [1]+[1.0j/w_i for w_i in w_imag[1:]]
+    #C_almost_inv = np.diag(one_over_C_diag)
     # create the forward-transform matrix, E
     E_inv = np.zeros([N,N], dtype=np.complex_)
     for i in range(N):
@@ -206,16 +214,30 @@ def plot_eigenvalues(A):
     '''
     import numpy as np
     import pylab as plt
-    
+    # compute the eigenvalues and eigenvectors
     eig_result = np.linalg.eig(A)
+    # extract the eigenvalues
     eigs = eig_result[0]
+    # separate the real and imaginary parts
     Re_parts = np.real(eigs)
     Im_parts = np.imag(eigs)
+    # plot eigenvalues on the complex plane
     plt.plot(Re_parts,Im_parts,'ko')
     plt.xlabel('Re')
     plt.ylabel('Im')
     plt.axis('equal')
-    plt.title('$eig\\left(D_{HB}\\right)$')
+    decimals_to_print = 4
+    title = ''
+    for k in range(len(eigs)):
+        if abs(Re_parts[k]) != 0.0:
+            title += str(np.around(Re_parts[k],decimals_to_print))
+        if abs(Im_parts[k]) != 0.0:
+            if np.sign(Im_parts[k]) == 1:
+                title += '\plus'
+            title += str(np.around(Im_parts[k],decimals_to_print))+'i'
+        if not k == len(eigs)-1:
+            title += ',\quad'
+    plt.title('$eig\\left(D_{HB}\\right) \, = \,'+title+'$', y=1.03)
     plt.grid()
 #-----------------------------------------------------------------------------#
 #######################################
@@ -242,8 +264,8 @@ f,df = my_non_periodic_fun(t, actual_omegas)
 # create the harmonic balance operator matrix
 D_HB, t_HB = harmonic_balance_operator(omegas)
 print('omegas = ', omegas)
-print('D_HB = ', D_HB,'\n')
-print('cond(D_HB) =', np.linalg.cond(D_HB))
+print('D_HB = ', np.around(D_HB,3),'\n')
+print('cond(D_HB) =', np.linalg.cond(D_HB),'\n')
 plot_eigenvalues(D_HB)
 
 # [HB] checking to see if we can find time derivatives
@@ -270,6 +292,8 @@ plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega
 
 # set the error range to study
 abs_percent_error = 75
+# pick which measure of error to use ('f-difference' or 'distance')
+error_measure = 'distance'
 
 # initialize the set of percent errors to try 
 percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
@@ -291,10 +315,12 @@ for error_percentage in percent_errors:
     df_HB = np.dot(D_HB, f_HB)
     t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
     # compute error of incorrect solution, using values at interpolation points
-    # just just the error in df
-    sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
-    # compute distance on (t,df) plane    
-    sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
+    if error_measure == 'f-difference':
+        # just just the error in df
+        sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
+    if error_measure == 'distance':
+        # compute distance on (t,df) plane    
+        sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
     
     # find the l2-norm of the error
     norm_sol_error = myNorm(sol_error)
@@ -307,8 +333,10 @@ for error_percentage in percent_errors:
 plt.figure()
 plt.plot(percent_errors, norm_sol_errors, 'k.-')
 plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
-#plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
-plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
+if error_measure == 'f-difference':
+    plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
+if error_measure == 'distance':
+    plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
 plt.tight_layout()
 # find the interpolated HB derivative with the most incorrect frequencies
@@ -335,7 +363,7 @@ plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega
 #####################################################################
 first_omega = 1.0
 starting_multiple = 1
-max_multiple = 5
+max_multiple = 25
 multiples = myLinspace(starting_multiple, max_multiple, 150*int(max_multiple-starting_multiple)+1)
 plot_nondim_omegas = False
 
