@@ -83,14 +83,13 @@ def my_non_periodic_ode(t, u, omegas):
     sum of sinusoids oscillating at the frequencies specified
     '''
     import math
-    
     # The equation for periodic population harvesting
     C = 10                    # carrying capacity
     # expression giving the derivative    
     dudt = u*(1-(u/C))
     # run through all the frequencies
     for omega in omegas:
-        dudt = dudt - math.sin(omega*t)
+        dudt -= math.sin(omega*t)
     return dudt
 #-----------------------------------------------------------------------------#
 def harmonic_balance_operator(omegas):
@@ -141,7 +140,6 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=None):
     Fourier series that uses a specific set of frequencies. The interpolation 
     is constructed using coefficients found for the cosine and sine terms by
     solving a linear system built up from the given abscissas and ordinates.
-    
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
       - ordinates, y (as a list) (again, leave out last point, if periodic)
@@ -265,6 +263,7 @@ f,df = my_non_periodic_fun(t, actual_omegas)
 D_HB, t_HB = harmonic_balance_operator(omegas)
 print('omegas = ', omegas)
 print('D_HB = ', np.around(D_HB,3),'\n')
+print('det(D_HB) = ', np.linalg.det(D_HB))
 print('cond(D_HB) =', np.linalg.cond(D_HB),'\n')
 plot_eigenvalues(D_HB)
 
@@ -308,12 +307,12 @@ t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB
 # loop through the various errors to try
 for error_percentage in percent_errors:
     # set the wrong angular frequencies
-    omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
+    trial_omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
     # find the interpolated HB derivative with the incorrect frequencies
-    D_HB, t_HB = harmonic_balance_operator(omegas)
+    D_HB, t_HB = harmonic_balance_operator(trial_omegas)
     f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
     df_HB = np.dot(D_HB, f_HB)
-    t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
+    t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
     # compute error of incorrect solution, using values at interpolation points
     if error_measure == 'f-difference':
         # just just the error in df
@@ -321,14 +320,13 @@ for error_percentage in percent_errors:
     if error_measure == 'distance':
         # compute distance on (t,df) plane    
         sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
-    
     # find the l2-norm of the error
     norm_sol_error = myNorm(sol_error)
     norm_sol_errors.append(norm_sol_error)
     # store the current omegas if they yield a higher error
     if max_norm_sol_error < norm_sol_error:
         max_norm_sol_error = norm_sol_error
-        max_error_omegas = omegas
+        max_error_omegas = trial_omegas
 # plot the norm of the solution errors
 plt.figure()
 plt.plot(percent_errors, norm_sol_errors, 'k.-')
@@ -340,23 +338,23 @@ if error_measure == 'distance':
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
 plt.tight_layout()
 # find the interpolated HB derivative with the most incorrect frequencies
-omegas = max_error_omegas
-D_HB, t_HB = harmonic_balance_operator(omegas)
+max_omegas = max_error_omegas
+D_HB, t_HB = harmonic_balance_operator(max_omegas)
 f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
 df_HB_wrong = np.dot(D_HB, f_HB)
-t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas)
+t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
 # plot the correct derivative and the worst answer studied
 plt.figure()
 plt.plot(t, f, label='$f_{exact}$')
 plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
 plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
 plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
-t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,omegas)
+t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
 plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
 plt.xlabel('$t$', fontsize=16)
 plt.ylabel('$f(t)$', fontsize=16)
 plt.legend(loc='best')
-plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
+plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
 
 #####################################################################
 # See how condition number varies with selected angular frequencies #
@@ -391,20 +389,20 @@ else:
     plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$', fontsize=18)
 plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
 
-##################################
-# [time accurate] explicit euler #
-##################################
+##########################################
+# [time accurate] explicit forward euler #
+##########################################
 delta_t = 0.05             # time step
 initial_value = 2.0        # intitial condition
 
 t_start = 0                # initial time
 t_end = 100                 # approx. final time (stop at or just after)
-  
-f = []
-times = []
+
 time_points = int(math.ceil((t_end-t_start)/delta_t)+1)
 
 # time stepping
+times = []
+f = []
 for n in range(time_points):
     times.append(t_start+n*delta_t)
     if n == 0:
