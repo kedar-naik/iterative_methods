@@ -304,7 +304,7 @@ def linearInterp(x, y, x_int=None, verbose=False):
         
         # print progress to the screen, if requested
         if verbose:
-            if round(i*100.0/n_int) % 25 == 0:
+            if round(i*100.0/n_int) % 10 == 0:
                 print('linear interpolation: '+str(round(i*100.0/n_int,2))+'% done')
             
     return (x_int, y_int)
@@ -741,7 +741,7 @@ def integrate_segments(t, f_ts, T, make_plot=False, verbose=False):
     from math import ceil                    # for setting span_points
     import matplotlib                        # import by itself first
     matplotlib.use('Agg')                    # use Anti-Grain Geometry backend
-    from matplotlib import pylab as plt      # must be called AFTER use()
+    from matplotlib import pyplot as plt      # must be called AFTER use()
     
     # number of time instances
     N = len(t)
@@ -987,7 +987,7 @@ def main():
     import math
     import matplotlib                        # import by itself first
     matplotlib.use('Agg')                    # use Anti-Grain Geometry backend
-    from matplotlib import pylab as plt      # must be called AFTER use()
+    from matplotlib import pyplot as plt      # must be called AFTER use()
     from matplotlib import animation         # for specifying the writer
     
     # close open windows
@@ -1570,30 +1570,28 @@ def main():
     plt.subplot(1,n_plots,1)
     #dots, = plt.plot([],[],'ko',label='$f_{TS}$')
     #line, = plt.plot([],[],'k--',label='$ Fourier \, interp.$')
-    plt.xlabel(r'$t$', fontsize=18)
-    plt.ylabel(r'$f\left(t\right)$', fontsize=18)
-    plt.legend(loc='upper right')
-    ave_init_value = sum(f_TS_hist[0])/N
+    
+    #plt.legend(loc='upper right')
+    #ave_init_value = sum(f_TS_hist[0])/N
     max_final = max(f_TS_hist[-1])
     min_final = min(f_TS_hist[-1])
     ampl_final = abs(max_final-min_final)
     white_space = ampl_final/3.0
     #plt.xlim(0,T)
-    if animate_plot == True:
-        start = min(ave_init_value, max_final+white_space)
-        finish = max(ave_init_value, max_final+white_space)        
+    #if animate_plot == True:
+    #    start = min(ave_init_value, max_final+white_space)
+   #     finish = max(ave_init_value, max_final+white_space)        
         #plt.ylim(start, finish)
-    else:
-        start = min(min_final-white_space,max_final+white_space)
-        finish = max(min_final-white_space,max_final+white_space)
-        plt.ylim(start, finish)
+   # else:
+   #     start = min(min_final-white_space,max_final+white_space)
+   #     finish = max(min_final-white_space,max_final+white_space)
+   #     plt.ylim(start, finish)
     # residual history plot
     plt.subplot(1,n_plots,2)
     #res, = plt.semilogy([],[],'b-',label='TS residual')
     #bdf_res, = plt.semilogy([],[],'g-',label='BDF residual')
     plt.xlabel(r'$iteration$', fontsize=18)
     plt.ylabel(r'$\|R\|$', fontsize=18)
-    plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
     plt.xlim(0,iteration)
     min_power = int(math.log(min(res_hist),10))-1
     max_power = int(math.log(max(res_hist),10))+1
@@ -1624,20 +1622,24 @@ def main():
         for n in all_frames:
             # plot solution and interpolation
             plt.subplot(1,n_plots,1)
+            plt.cla()
             t_plot = [(float(T_hist[n])/N)*index for index in indices]
             plt.plot(t_plot,f_TS_hist[n],'ko',label='$f_{TS}$')
             t_int,f_TS_int, dummy1 = fourierInterp(t_plot,f_TS_hist[n])
             plt.plot(t_int,f_TS_int,'k--',label='$ Fourier \, interp.$')
+            plt.xlabel(r'$t$', fontsize=18)
+            plt.ylabel(r'$f\left(t\right)$', fontsize=18)
             plt.xlim(0,T_hist[n])
             plt.ylim(min(f_TS_hist[n])-white_space,max(f_TS_hist[n])+white_space)
             if period_plot:
                 plt.subplot(1,n_plots,1)
-                #plt.xlim(0,max(T_hist))
+                plt.xlim(0,max(T_hist))
             plt.title(r'$iteration \,\#$'+'$'+str(n)+'$')
             #plt.legend(loc='best')
             # plot residual            
             plt.subplot(1,n_plots,2)
-            plt.plot(list(range(n)),res_hist[:n],'b-',label='TS residual')
+            plt.semilogy(list(range(n)),res_hist[:n],'b-',label='TS residual')
+            plt.title(r'$\Delta\tau = '+str(delta_tau_hist[n])+'$')
             if compare_to_bdf:
                 plt.plot(list(range(n)),res_bdf_hist[:n])
                 plt.legend(loc='best')
@@ -1681,7 +1683,7 @@ def main():
 
         fig = plt.figure()
         plot_name = 'error metric vs T'
-        plt.plot(T_hist,error_metric_hist,'ko', markersize=2)
+        plt.semilogy(T_hist,error_metric_hist,'ko', markersize=2)
         plt.xlabel(r'$T$', fontsize=18)
         plt.ylabel(r'$error \,\, metric$', fontsize=18)
         plt.title(r'$\Delta\tau = '+str(delta_tau)+r'\, ; \, \Delta\tau_T = '+str(delta_tau_T)+'\, ; \, T_{found} = '+str(round(T,3))+'$')
@@ -1694,7 +1696,7 @@ def main():
     if adjust_delta_tau:
         fig = plt.figure()
         plot_name = 'pseudo-time step'
-        plt.plot(list(range(iteration)),delta_tau_hist[:-1],'k.-')
+        plt.semilogy(list(range(iteration)),delta_tau_hist[:-1],'k.-')
         plt.xlabel(r'$iteration$', fontsize=18)
         plt.ylabel(r'$\Delta\tau$', fontsize=18)
         print('saving final image...')

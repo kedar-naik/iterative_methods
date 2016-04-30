@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed Apr 13 01:16:35 2016
-
 @author: Kedar
 """
 
 import math
-import pylab as plt
-from time_spectral import myLinspace, myNorm
+from matplotlib import pyplot as plt
+from time_spectral import myLinspace, myNorm, linearInterp
 from matplotlib import animation         # for specifying the writer
 import numpy as np
 plt.close('all')
@@ -34,13 +33,14 @@ def period_given_freqs(omegas):
     '''
     import decimal
     from functools import reduce
+    from math import gcd
     # find the maximum number of decimal points seen the given frequencies
     decimal_pts = [-decimal.Decimal(str(f)).as_tuple().exponent for f in omegas]
     max_dec_pts = max(decimal_pts)
     # multiply all frequencies by the power of ten that make them integers
     scaled_omegas = [int(omega*pow(10,max_dec_pts)) for omega in omegas]
     # find the greatest common divisor of these scaled frequencies
-    GCD = reduce(lambda x,y: math.gcd(x,y), scaled_omegas)
+    GCD = reduce(lambda x,y: gcd(x,y), scaled_omegas)
     # compute the multiple of the lowest-frequency period
     lowest_multiple = min(scaled_omegas)/GCD
     lowest_omega_period = 2.0*math.pi/min(omegas)
@@ -196,7 +196,7 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=None):
     y_int = [0.0]*n_int
     dydx_int = [0.0]*n_int
     for i in range(n_int):
-        y_int[i] = a[0]/2.0    # the "DC" value
+        y_int[i] = a[0]        # the "DC" value
         dydx_int[i] = 0.0      # intialize the summation
         for j in range(m-1):
             y_int[i] += a[j+1]*math.cos(omegas[j+1]*x_int[i]) + \
@@ -238,6 +238,7 @@ def plot_eigenvalues(A):
     plt.title('$eig\\left(D_{HB}\\right) \, = \,'+title+'$', y=1.03)
     plt.grid()
 #-----------------------------------------------------------------------------#
+
 #######################################
 # actual periods of the two solutions #
 #######################################
@@ -245,8 +246,6 @@ def plot_eigenvalues(A):
 # compute and print the periods of the various signals
 T_HB_sol = period_given_freqs(omegas)
 T_actual_sol = period_given_freqs(actual_omegas)
-print('\nPeriod of HB solution:', round(T_HB_sol,3))
-print('\nPeriod of the ODE solution:', round(T_actual_sol,3),'\n')
 
 ###########################################################################
 # [harmonic balance] Check to see if Harmonic Balance operator is working #
@@ -261,10 +260,8 @@ f,df = my_non_periodic_fun(t, actual_omegas)
 
 # create the harmonic balance operator matrix
 D_HB, t_HB = harmonic_balance_operator(omegas)
-print('omegas = ', omegas)
-print('D_HB = ', np.around(D_HB,3),'\n')
-print('det(D_HB) = ', np.linalg.det(D_HB))
-print('cond(D_HB) =', np.linalg.cond(D_HB),'\n')
+
+# plot the eigenvalues of the HB operator matrix
 plot_eigenvalues(D_HB)
 
 # [HB] checking to see if we can find time derivatives
@@ -294,6 +291,8 @@ abs_percent_error = 75
 # pick which measure of error to use ('f-difference' or 'distance')
 error_measure = 'distance'
 
+# print message to the screen
+print('\nstudying the effect of supplying incorrect frequencies...')
 # initialize the set of percent errors to try 
 percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
 # instantiate list for plotting
@@ -362,9 +361,11 @@ plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega
 first_omega = 1.0
 starting_multiple = 1
 max_multiple = 25
-multiples = myLinspace(starting_multiple, max_multiple, 150*int(max_multiple-starting_multiple)+1)
+multiples = myLinspace(starting_multiple, max_multiple, 50*int(max_multiple-starting_multiple)+1)
 plot_nondim_omegas = False
 
+# print message to the screen
+print('\nstudying the effect of different frequencies pairs on cond(D_HB)...\n')
 conds = []
 nondim_omegas = []
 for multiple in multiples:
@@ -411,10 +412,10 @@ for n in range(time_points):
     else:
         # explicitly step forward in time (give it the actual frequencies!)
         f.append(f[n-1] + delta_t*my_non_periodic_ode(times[n-1],f[n-1],actual_omegas))
-
+    
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
-animate_plot = False                
+animate_plot = False
 plot_name = 'time-accurate ODE (HB)'
 n_images = time_points            # total number of images computed
 skip_images = 15                   # images to skip between animation frames
@@ -459,3 +460,175 @@ plt.savefig(plot_name, dpi=500)
 print('figure saved: ' + plot_name)
 # free memory used for the plot
 plt.close(fig)
+
+##########################################################################
+# Find the solution over the lowest-frequency period using the HB method #
+##########################################################################
+
+# constant value of the initial guess for the HB solution
+init_guess = 1.0
+
+# pseudo-time step size
+delta_tau = 0.075
+
+# residual convergence criteria
+residual_convergence_criteria = 1e-5
+
+# maximum number of pseudo-time steps to try
+max_pseudo_steps = 100000
+
+# create the harmonic balance operator matrix and find the time instances
+D_HB, t_HB = harmonic_balance_operator(omegas)
+# create a constant-valued initial guess for the HB solution
+f_HB = np.array([init_guess]*len(t_HB)).reshape((len(t_HB),1))
+# create a list for the solution evolution history
+f_HB_history = [np.copy(f_HB)]
+# create a list for the residual evolution history
+residual_history = []
+
+# start the pseudo-transient continuation method
+for k in range(max_pseudo_steps):
+    # compute the residual vector corresponding the current solution
+    right_hand_side = np.array([my_non_periodic_ode(t,f,actual_omegas) for t,f in zip(t_HB,f_HB)]).reshape((len(t_HB),1))
+    matrix_vector_product = np.dot(D_HB,f_HB)
+    residual = right_hand_side - matrix_vector_product
+    # compute the norm of the residual vector and print to the screen
+    norm_residual = np.linalg.norm(residual)
+    residual_history.append(norm_residual)    
+    print('iter: '+str(k)+'\tnorm residual: '+str(norm_residual))
+    # if convergence criteria is not met, update solution
+    if norm_residual < residual_convergence_criteria:
+        # converged solution found
+        print('\n\tharmonic balance solution found.\n')
+        break
+    elif np.isnan(norm_residual) or np.isinf(norm_residual):
+        # unstable solution
+        print('\n\t unstable solution. try again. \n')
+        break
+    else:
+        # update solution
+        f_HB += delta_tau*residual
+        f_HB_history.append(np.copy(f_HB))
+
+# plotting: USER INPUTS! do you want to animate the solution history or just
+# plot the final result? (True = animate, False = just print final result)
+animate_plot = True
+plot_name = 'harmonic-balance ODE'
+n_images = k+1       # total number of images computed
+skip_images = 11     # images to skip between animation frames
+
+# plotting: instantiate the figure
+fig = plt.figure(plot_name)
+# plotting: rescale the figure window to fit both subplots
+xdim, ydim = plt.gcf().get_size_inches()
+# for two plots, this scaling can't be more than 1.7!!!
+plt.gcf().set_size_inches(1.7*xdim, ydim, forward=True)
+# set the title for the HB solution plot
+title = ''
+counter=1
+for omega in omegas:
+    title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
+    counter += 1
+# things that won't change for the residual history plot
+plt.subplot(1,2,2)
+plt.xlabel('$iteration$', fontsize=16)
+plt.ylabel('$\\left\Vert \\frac{\partial f}{\partial t} \minus D_{HB}f_{HB} \\right\Vert_2$', fontsize=16)
+plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
+plt.xlim(0, k)
+min_power = int(math.log(min(residual_history),10))-1
+max_power = int(math.log(max(residual_history),10))+1
+plt.ylim(pow(10,min_power), pow(10,max_power))
+# plotting: set the total number of frames
+if animate_plot == True:
+    # capture all frames (skipping, if necessary) and the final frame
+    all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
+else:
+    # no animation: just capture the last one
+    all_frames = [n_images-1]
+# plotting: capturing the movie
+writer = animation.writers['ffmpeg'](fps=15)
+with writer.saving(fig, plot_name+'.mp4', 300):
+    frame = 0
+    for n in all_frames:
+        # plot the HB solution
+        plt.subplot(1,2,1)
+        plt.cla()
+        plt.plot(t_HB,f_HB_history[n],'ko')
+        t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB_history[n], omegas)
+        plt.plot(t_HB_int, f_HB_int, 'k--')
+        plt.xlabel('$t$', fontsize=16)
+        plt.ylabel('$f_{HB}$', fontsize=16)
+        plt.ylim(np.min(f_HB_history), np.max(f_HB_history))
+        plt.title(title)
+        # plot the residual
+        plt.subplot(1,2,2)
+        plt.semilogy(residual_history[:n],'b-')
+        # set spacing options
+        plt.tight_layout()
+        #plt.subplots_adjust(right=1.2)
+        # progress monitor
+        percent_done = float(n)*100.0/(n_images-1)
+        print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+               round(percent_done,2),'%')
+        writer.grab_frame()
+        frame += 1
+    writer.grab_frame()
+# rescale the y-axis of the HB solution plot before saving an image
+plt.subplot(1,2,1)
+white_space = (max(f_HB_int)-min(f_HB_int))/5.0
+plt.ylim(min(f_HB_int)-white_space,max(f_HB_int)+white_space)
+# plotting: save an image of the final frame
+print('\n'+'saving final image...')
+plt.savefig(plot_name, dpi=500)
+print('figure saved: ' + plot_name + '\n')
+# free memory used for the plot
+plt.close(fig)
+
+##########################################################
+# compare the harmonic-balance and time-accurate results #
+##########################################################
+
+# find the average value of the harmonic-balance solution
+f_ave_HB = np.average(f_HB_int)
+
+# to compare the average value of the time-accurate solution to the average
+# value of the harmonic-balance solution, we find the time span over which the
+# harmonic-balance solution is computed (time period corresponding to the 
+# lowest omega being supplied to the HB method) and then see how many of those 
+# T_HB_spans can be fit completely into the last half of the time-accurate 
+# simulation. average over that part to get the average steady-state value
+use_last = 1/10      # 1/2 = last half, 1/3 = last third, etc
+if T_lowest_omega < (t_end-t_start)*use_last:
+    print('constrcuting a proper comparison between f_TA and f_HB...\n')
+    T_last_half_in_T_HBs = math.floor(((t_end-t_start)*use_last)/T_lowest_omega)*T_lowest_omega
+    t_check = myLinspace(t_end-T_last_half_in_T_HBs,t_end,int(time_points*use_last))
+    t_check,f_check = linearInterp(times, f, t_check, verbose=True)
+    f_ave_TA = sum(f_check)/int(time_points*use_last)
+else:
+    f_ave_TA = 'nan'
+
+################################################
+# print all intermediate results to the screen #
+################################################
+
+# actual periods of the HB solution and the actual ODE solution
+print('\n-true periods of solutions, based on given angular frequencies:')
+print('\n\tperiod of HB solution:', round(T_HB_sol,3))
+print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
+
+# print information about the HB operator
+print('\n-a look at the HB operator:\n')
+print('\tomegas =', omegas)
+print('\n\tD_HB = ', str(np.around(D_HB,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
+print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
+print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
+
+# print both to the screen
+print('\n-comparing the TA and HB average function values:')
+if f_ave_TA == 'nan':
+    print('\n\tf_ave (time-accurate) was not computed!')
+    print('\t - need to include more of the time-accurate solution...')
+    print('\t - increase parameter "use_last"\n')
+else:
+    print('\n\tf_ave (time-accurate) = '+str(f_ave_TA))
+    print('\tf_ave (harmonic-balance) = '+str(f_ave_HB)+'\n')
