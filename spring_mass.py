@@ -318,7 +318,7 @@ plt.title('$\omega = ' + str(round(omega,2)) + \
           '\quad \Delta t = ' + str(del_t) + '$')
 # save plot and close
 plt.savefig(time_trace_filename, dpi=300)
-print('\nfigure saved: '+str(time_trace_plot_name))
+print('\nfigure saved: '+time_trace_plot_name)
 plt.close(time_trace_plot_name)
 # open the saved image
 webbrowser.open(time_trace_filename)

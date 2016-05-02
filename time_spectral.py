@@ -1638,7 +1638,10 @@ def main():
             #plt.legend(loc='best')
             # plot residual            
             plt.subplot(1,n_plots,2)
-            plt.semilogy(list(range(n)),res_hist[:n],'b-',label='TS residual')
+            if n > 0 and res_hist[n] >= res_hist[0]:
+                plt.semilogy(res_hist[:n+1],'g-')
+            else:
+                plt.semilogy(res_hist[:n+1],'r-',label='TS residual')
             plt.title(r'$\Delta\tau = '+str(delta_tau_hist[n])+'$')
             if compare_to_bdf:
                 plt.plot(list(range(n)),res_bdf_hist[:n])
@@ -1646,7 +1649,7 @@ def main():
             # plot period
             if period_plot:
                 plt.subplot(1,n_plots,3)
-                plt.plot(list(range(n)),T_hist[:n],'r-')
+                plt.plot(T_hist[:n+1],'m-')
                 plt.xlim(0,iteration)
             # progress monitor
             frame += 1

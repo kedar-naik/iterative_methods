@@ -9,7 +9,10 @@ from matplotlib import pyplot as plt
 from time_spectral import myLinspace, myNorm, linearInterp
 from matplotlib import animation         # for specifying the writer
 import numpy as np
-plt.close('all')
+import webbrowser
+
+# turn off interactive mode, so that plot windows don't pop up
+plt.ioff()
 
 # angular frequencies in the underlying signal
 actual_omegas = [1.5, 2.3]
@@ -206,12 +209,14 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=None):
                             a[j+1]*math.sin(omegas[j+1]*x_int[i]))
     return (x_int, y_int, dydx_int)
 #-----------------------------------------------------------------------------#    
-def plot_eigenvalues(A):
+def plot_eigenvalues(A, auto_open=False):
     '''
     Plots the eigenvalues of the given matrix on the complex plane.
+    Open the plot automatically, if desired.
     '''
     import numpy as np
-    import pylab as plt
+    from matplotlib import pyplot as plt
+    import webbrowser
     # compute the eigenvalues and eigenvectors
     eig_result = np.linalg.eig(A)
     # extract the eigenvalues
@@ -220,6 +225,8 @@ def plot_eigenvalues(A):
     Re_parts = np.real(eigs)
     Im_parts = np.imag(eigs)
     # plot eigenvalues on the complex plane
+    plot_name = 'HB_eigenvalues'
+    plt.figure(plot_name)
     plt.plot(Re_parts,Im_parts,'ko')
     plt.xlabel('Re')
     plt.ylabel('Im')
@@ -237,6 +244,15 @@ def plot_eigenvalues(A):
             title += ',\quad'
     plt.title('$eig\\left(D_{HB}\\right) \, = \,'+title+'$', y=1.03)
     plt.grid()
+    # save plot and close
+    print('\n'+'saving final image...')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('\nfigure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
 #-----------------------------------------------------------------------------#
 
 #######################################
@@ -262,7 +278,7 @@ f,df = my_non_periodic_fun(t, actual_omegas)
 D_HB, t_HB = harmonic_balance_operator(omegas)
 
 # plot the eigenvalues of the HB operator matrix
-plot_eigenvalues(D_HB)
+plot_eigenvalues(D_HB, auto_open=False)
 
 # [HB] checking to see if we can find time derivatives
 f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
@@ -270,7 +286,9 @@ f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
 df_HB = np.dot(D_HB, f_HB)
 
 # plot everything
-plt.figure()
+plot_name = 'HB_operator_check'
+auto_open = False
+plt.figure(plot_name)
 plt.plot(t, f, label='$f_{exact}$')
 plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
 plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
@@ -281,7 +299,16 @@ plt.xlabel('$t$', fontsize=16)
 plt.ylabel('$f(t)$', fontsize=16)
 plt.legend(loc='best')
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
-
+# save plot and close
+print('\n'+'saving final image...')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=300)
+print('\nfigure saved: '+plot_name)
+plt.close(plot_name)
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
+    
 ############################################################################
 # See how the error in the derivatives changes if the freqs used are wrong #
 ############################################################################
@@ -326,8 +353,11 @@ for error_percentage in percent_errors:
     if max_norm_sol_error < norm_sol_error:
         max_norm_sol_error = norm_sol_error
         max_error_omegas = trial_omegas
+        
 # plot the norm of the solution errors
-plt.figure()
+plot_name = 'supplying_incorrect_freqs'
+auto_open = False
+plt.figure(plot_name)
 plt.plot(percent_errors, norm_sol_errors, 'k.-')
 plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
 if error_measure == 'f-difference':
@@ -336,14 +366,27 @@ if error_measure == 'distance':
     plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
 plt.tight_layout()
+# save plot and close
+print('\n'+'saving final image...')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=300)
+print('\nfigure saved: '+plot_name)
+plt.close(plot_name)
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
+    
 # find the interpolated HB derivative with the most incorrect frequencies
 max_omegas = max_error_omegas
 D_HB, t_HB = harmonic_balance_operator(max_omegas)
 f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
 df_HB_wrong = np.dot(D_HB, f_HB)
 t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
+
 # plot the correct derivative and the worst answer studied
-plt.figure()
+plot_name = 'result_at_worst_answer'
+auto_open = False
+plt.figure(plot_name)
 plt.plot(t, f, label='$f_{exact}$')
 plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
 plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
@@ -354,7 +397,16 @@ plt.xlabel('$t$', fontsize=16)
 plt.ylabel('$f(t)$', fontsize=16)
 plt.legend(loc='best')
 plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
-
+# save plot and close
+print('\n'+'saving final image...')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=300)
+print('\nfigure saved: '+plot_name)
+plt.close(plot_name)
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
+    
 #####################################################################
 # See how condition number varies with selected angular frequencies #
 #####################################################################
@@ -379,7 +431,10 @@ for multiple in multiples:
 peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+2*np.std(conds)]
 nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(conds)) if conds[i] > np.average(conds)+2*np.std(conds)]
 
-plt.figure()
+# plot the result
+plot_name = 'cond(HB)_vs_freq_ratio'
+auto_open = False
+plt.figure(plot_name)
 if plot_nondim_omegas:
     plt.semilogy(nondim_omegas, conds, 'k.-')
     plt.xlabel('$\delta^*_{\omega_2}=2\,\\frac{\omega_2-\omega_1}{\omega_2+\omega_1}$', fontsize=16)
@@ -389,6 +444,15 @@ else:
     plt.xlabel('$\omega_2/\omega_1$', fontsize=16)
     plt.title('$outliers \,\, at: \quad '+str(peaks)[1:-1]+'$', fontsize=18)
 plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
+# save plot and close
+print('\n'+'saving final image...')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=300)
+print('\nfigure saved: '+plot_name)
+plt.close(plot_name)
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
 
 ##########################################
 # [time accurate] explicit forward euler #
@@ -415,10 +479,12 @@ for n in range(time_points):
     
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
-animate_plot = False
+animate_plot = True
 plot_name = 'time-accurate ODE (HB)'
-n_images = time_points            # total number of images computed
-skip_images = 15                   # images to skip between animation frames
+n_images = time_points          # total number of images computed
+skip_images = 45                # images to skip between animation frames
+auto_play = False                # automatically play the movie
+auto_open = False                # automatically open the final image
 
 # plotting: initializations
 fig = plt.figure()
@@ -446,7 +512,7 @@ writer = animation.writers['ffmpeg'](fps=15)
 with writer.saving(fig, plot_name+'.mp4', 300):
     frame = 0
     for n in all_frames:
-        plt.plot(times[:n+1],f[:n+1],'k-')
+        plt.plot(times[:n+1],f[:n+1],'b-')
         # progress monitor
         percent_done = float(n)*100.0/(n_images-1)
         print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
@@ -456,10 +522,17 @@ with writer.saving(fig, plot_name+'.mp4', 300):
     writer.grab_frame()
 # plotting: save an image of the final frame
 print('\n'+'saving final image...')
-plt.savefig(plot_name, dpi=500)
-print('figure saved: ' + plot_name)
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=500)
+print('figure saved: '+plot_name+'\n')
 # free memory used for the plot
 plt.close(fig)
+# start playing the movie, if desired
+if animate_plot and auto_play:
+    webbrowser.open(plot_name+'.mp4')
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
 
 ##########################################################################
 # Find the solution over the lowest-frequency period using the HB method #
@@ -514,8 +587,10 @@ for k in range(max_pseudo_steps):
 # plot the final result? (True = animate, False = just print final result)
 animate_plot = True
 plot_name = 'harmonic-balance ODE'
-n_images = k+1       # total number of images computed
-skip_images = 11     # images to skip between animation frames
+n_images = k+1      # total number of images computed
+skip_images = 11    # images to skip between animation frames
+auto_play = False    # automatically play the movie
+auto_open = False    # automatically open the final image
 
 # plotting: instantiate the figure
 fig = plt.figure(plot_name)
@@ -562,7 +637,10 @@ with writer.saving(fig, plot_name+'.mp4', 300):
         plt.title(title)
         # plot the residual
         plt.subplot(1,2,2)
-        plt.semilogy(residual_history[:n],'b-')
+        if n > 0 and residual_history[n] >= residual_history[0]:
+            plt.semilogy(residual_history[:n+1],'g-')
+        else:
+            plt.semilogy(residual_history[:n+1],'r-')
         # set spacing options
         plt.tight_layout()
         #plt.subplots_adjust(right=1.2)
@@ -579,10 +657,17 @@ white_space = (max(f_HB_int)-min(f_HB_int))/5.0
 plt.ylim(min(f_HB_int)-white_space,max(f_HB_int)+white_space)
 # plotting: save an image of the final frame
 print('\n'+'saving final image...')
-plt.savefig(plot_name, dpi=500)
-print('figure saved: ' + plot_name + '\n')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=500)
+print('figure saved: '+plot_name+'\n')
 # free memory used for the plot
 plt.close(fig)
+# start playing the movie, if desired
+if animate_plot and auto_play:
+    webbrowser.open(plot_name+'.mp4')
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
 
 ##########################################################
 # compare the harmonic-balance and time-accurate results #
@@ -606,6 +691,101 @@ if T_lowest_omega < (t_end-t_start)*use_last:
     f_ave_TA = sum(f_check)/int(time_points*use_last)
 else:
     f_ave_TA = 'nan'
+
+# interpolate the HB solution onto a grid that has same interval as TA solution
+print('\ninterpolating the HB solution onto a grid with the same interval as the TA solution...\n')
+N_delta_t_per_T_HB = math.floor(T_lowest_omega/delta_t)
+T_HB_check = N_delta_t_per_T_HB*delta_t
+N_checkpoints = N_delta_t_per_T_HB+1
+t_HB_check = myLinspace(0.0, T_HB_check, N_checkpoints)
+t_HB_check,f_HB_check = linearInterp(t_HB_int, f_HB_int, t_HB_check, verbose=True)
+
+# figure out where along the "long" period of the time-accurate solution the 
+# harmonic-balance solution lies
+min_norm_diff = 1e6
+norm_diffs = []
+min_index = 0
+t_HB_int_min_shifted = []       # interpolated HB sol at the best minimum
+t_HB_min_shifted = []           # HB sol at the time instances at best minimum
+t_HB_int_trial_shifted = []     # "proving" (sliding) interpolated HB solution
+for i in range(-time_points,-N_checkpoints):
+    current_f_TA_range = f[i:i+N_checkpoints]
+    t_HB_int_current = [t+times[i] for t in t_HB_check]
+    diff = [abs(f_HB_check[j]-current_f_TA_range[j]) for j in range(N_checkpoints)]
+    norm_diff = myNorm(diff)
+    if norm_diff < min_norm_diff:
+        min_norm_diff = norm_diff
+        min_index = i
+        t_HB_int_min_current = t_HB_int_current
+        t_HB_min_current = [t+times[i] for t in t_HB]
+    norm_diffs.append(norm_diff)
+    t_HB_int_min_shifted.append(t_HB_int_min_current)
+    t_HB_min_shifted.append(t_HB_min_current)
+    t_HB_int_trial_shifted.append(t_HB_int_current)
+print('\ngenerating plot/animation of comparison process...\n')
+
+# plotting: USER INPUTS! do you want to animate the solution history or just
+# plot the final result? (True = animate, False = just print final result)
+animate_plot = True
+plot_name = 'sliding_comparison_HB_with_TA'
+n_images = len( t_HB_min_shifted)        # total number of images computed
+skip_images = 40                # images to skip between animation frames
+auto_play = False                # automatically play the movie
+auto_open = False                # automatically open the final image
+
+# plotting: initializations
+fig = plt.figure()
+# plotting: things that will not be changing inside the loop
+vertical_padding = (max(f)-min(f))/4.0
+title = ''
+counter=1
+for omega in omegas:
+    title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
+    counter += 1
+
+# plotting: set the total number of frames
+if animate_plot == True:
+    # capture all frames (skipping, if necessary) and the final frame
+    all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
+else:
+    # no animation: just capture the last one
+    all_frames = [n_images-1]
+# plotting: capturing the movie
+writer = animation.writers['ffmpeg'](fps=15)
+with writer.saving(fig, plot_name+'.mp4', 300):
+    frame = 0
+    for n in all_frames:
+        plt.cla()
+        plt.plot(times,f,'b-')
+        plt.plot(t_HB_min_shifted[n],f_HB,'go')
+        plt.plot(t_HB_int_min_shifted[n],f_HB_check,'g-')
+        if not n==n_images-1:
+            plt.plot(t_HB_int_trial_shifted[n],f_HB_check,'m-')
+            plt.title(title+'$\Delta t = '+str(delta_t)+'\quad \\left\Vert f \minus f_{HB} \\right\Vert_2 = '+str(round(norm_diffs[n],2))+'$')
+        plt.xlabel('$t$', fontsize=18)
+        plt.ylabel('$f(t)$', fontsize=18)
+        plt.xlim(0,t_end)
+        plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
+        # progress monitor
+        percent_done = float(n)*100.0/(n_images-1)
+        print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+               round(percent_done,2),'%')
+        writer.grab_frame()
+        frame += 1
+    writer.grab_frame()
+# plotting: save an image of the final frame
+print('\n'+'saving final image...')
+file_name = plot_name+'.png'
+plt.savefig(file_name, dpi=500)
+print('figure saved: '+plot_name+'\n')
+# free memory used for the plot
+plt.close(fig)
+# start playing the movie, if desired
+if animate_plot and auto_play:
+    webbrowser.open(plot_name+'.mp4')
+# open the saved image, if desired
+if auto_open:
+    webbrowser.open(file_name)
 
 ################################################
 # print all intermediate results to the screen #
@@ -632,3 +812,4 @@ if f_ave_TA == 'nan':
 else:
     print('\n\tf_ave (time-accurate) = '+str(f_ave_TA))
     print('\tf_ave (harmonic-balance) = '+str(f_ave_HB)+'\n')
+

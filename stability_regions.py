@@ -5,8 +5,9 @@ Created on Tue Apr 12 20:16:31 2016
 @author: Kedar
 """
 
-import pylab as plt
+from matplotlib import pyplot as plt
 plt.close('all')
+plt.ion()
 
 x_start = -5.0
 x_end = 5.0
@@ -34,6 +35,7 @@ for i in range(y_points):
         if abs(Z[i][j]) <= 1.0:
             Re_parts.append(X[i][j])
             Im_parts.append(Y[i][j])
+
 
 plt.figure()
 plt.scatter(Re_parts,Im_parts)
