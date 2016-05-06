@@ -479,7 +479,7 @@ for n in range(time_points):
     
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
-animate_plot = True
+animate_plot = False
 plot_name = 'time-accurate ODE (HB)'
 n_images = time_points          # total number of images computed
 skip_images = 45                # images to skip between animation frames
@@ -539,16 +539,29 @@ if auto_open:
 ##########################################################################
 
 # constant value of the initial guess for the HB solution
-init_guess = 1.0
+init_guess = 10.0
 
 # pseudo-time step size
-delta_tau = 0.075
+delta_tau = 0.0783
+delta_tau = 0.16
+
+# choose a nonlinear iterative scheme
+pseudo_transient_continuation = True
+picard_iteration = False
+scaled_pseudo_transient_continuation = True
+
+# if scaled pseudo-transient continuation is being used, just make sure that 
+# regular pseudo-transient continuation is turned on too. also, initiate a 
+# starting pseudo-time
+if scaled_pseudo_transient_continuation:
+    pseudo_transient_continuation = True
+    tau = 0.01       # [pseudo seconds]
 
 # residual convergence criteria
 residual_convergence_criteria = 1e-5
 
 # maximum number of pseudo-time steps to try
-max_pseudo_steps = 100000
+max_pseudo_steps = 1000000
 
 # create the harmonic balance operator matrix and find the time instances
 D_HB, t_HB = harmonic_balance_operator(omegas)
@@ -561,14 +574,37 @@ residual_history = []
 
 # start the pseudo-transient continuation method
 for k in range(max_pseudo_steps):
+    
     # compute the residual vector corresponding the current solution
     right_hand_side = np.array([my_non_periodic_ode(t,f,actual_omegas) for t,f in zip(t_HB,f_HB)]).reshape((len(t_HB),1))
     matrix_vector_product = np.dot(D_HB,f_HB)
     residual = right_hand_side - matrix_vector_product
+
     # compute the norm of the residual vector and print to the screen
     norm_residual = np.linalg.norm(residual)
     residual_history.append(norm_residual)    
     print('iter: '+str(k)+'\tnorm residual: '+str(norm_residual))
+
+    # compute the "error," which is a function of the residual
+    if pseudo_transient_continuation:
+        I = np.eye(2*len(omegas)+1)     # identity matrix
+        step_size = delta_tau
+        if scaled_pseudo_transient_continuation:
+            # q = 1 and v = -1 is just regular pseudo-transient continuation
+            v = -1
+            q = lambda tau: 1           # differentiable w/ q(0)=1
+            # try a new scaling here
+            power_on_tau = -0.9
+            v = -1.0
+            q = lambda tau: 1+tau**(power_on_tau) # differentiable w/ q(0)=1
+            step_size = -(v*delta_tau)/q(tau)
+            tau += delta_tau
+        B = step_size*I
+    if picard_iteration:
+        B = np.linalg.inv(D_HB)         # inverse of HB operator
+    
+    error = np.dot(B,residual)
+    
     # if convergence criteria is not met, update solution
     if norm_residual < residual_convergence_criteria:
         # converged solution found
@@ -580,12 +616,13 @@ for k in range(max_pseudo_steps):
         break
     else:
         # update solution
-        f_HB += delta_tau*residual
+        #f_HB += delta_tau*residual
+        f_HB += error
         f_HB_history.append(np.copy(f_HB))
 
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
-animate_plot = True
+animate_plot = False
 plot_name = 'harmonic-balance ODE'
 n_images = k+1      # total number of images computed
 skip_images = 11    # images to skip between animation frames
@@ -726,7 +763,7 @@ print('\ngenerating plot/animation of comparison process...\n')
 
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
-animate_plot = True
+animate_plot = False
 plot_name = 'sliding_comparison_HB_with_TA'
 n_images = len( t_HB_min_shifted)        # total number of images computed
 skip_images = 40                # images to skip between animation frames
