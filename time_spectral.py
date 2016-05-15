@@ -304,8 +304,8 @@ def linearInterp(x, y, x_int=None, verbose=False):
         
         # print progress to the screen, if requested
         if verbose:
-            if round(i*100.0/n_int) % 10 == 0:
-                print('linear interpolation: '+str(round(i*100.0/n_int,2))+'% done')
+            if i*100.0/n_int % 10 <= 0.1:
+                print('\tlinear interpolation: '+str(round(i*100.0/n_int,2))+'% done')
             
     return (x_int, y_int)
     

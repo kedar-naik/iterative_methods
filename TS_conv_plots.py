@@ -44,9 +44,9 @@ if plot_me:
     plt.plot(2.0,3.47605031684e-11,'r*')
     plt.xlabel(r'$T$', fontsize=18)
     plt.ylabel(r'$\|R\|_{stall}$', fontsize=18)
-    print 'saving figure...'
+    print ('saving figure...')
     plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
+    print ('figure saved: ' + plot_name)
     plt.close()
 
 # plot the iterations required to reach stalled residual vs. the period
@@ -58,9 +58,9 @@ if plot_me:
     plt.plot(2.0,684037,'r*')
     plt.xlabel(r'$T$', fontsize=18)
     plt.ylabel(r'$iterations \,\,\, required$', fontsize=18)
-    print 'saving figure...'
+    print ('saving figure...')
     plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
+    print ('figure saved: ' + plot_name)
     plt.close()
 
 ###############################################################################
@@ -206,9 +206,9 @@ if plot_me:
     plt.xlabel(r'$T$', fontsize=18)
     plt.ylabel(r'$iterations \,\,\, required$', fontsize=18)
     plt.title(r'$converged \,\,to \colon \,\,$'+str(conv_crit)+r'$; \,\, \Delta \tau = \,$'+str(delta_tau)+r'$; \,\, T_{actual}= \,$'+str(T_actual))
-    print 'saving figure...'
+    print ('saving figure...')
     plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
+    print ('figure saved: ' + plot_name)
     plt.close()
 
 ######
@@ -393,9 +393,9 @@ if plot_me:
     plt.xlabel(r'$T$', fontsize=18)
     plt.ylabel(y_label, fontsize=18)
     plt.title(r'$converged \,\,to \colon \, $'+str(conv_crit)+r'$; \quad T_{actual}= \,$'+str(T_actual))
-    print 'saving figure...'
+    print ('saving figure...')
     plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
+    print ('figure saved: ' + plot_name)
     plt.close()
 
 
@@ -431,9 +431,9 @@ if plot_me:
     plt.plot(T_actual,init_conds_actual,'r*')
     plt.xlabel(r'$T$', fontsize=18)
     plt.ylabel(y_label, fontsize=18)
-    print 'saving figure...'
+    print ('saving figure...')
     plt.savefig(plot_name, dpi=500)
-    print 'figure saved: ' + plot_name
+    print ('figure saved: ' + plot_name)
     plt.close()
 
 ######
@@ -448,8 +448,7 @@ T_actual = 2.0                # correct T
 N = 17                        # no. of time instances
 
 # data:   T         % difference
-runs = [(0.25,    ),
-        (0.50,    -185.44),
+runs = [(0.50,    -185.44),
         (0.75,    -127.64),
         (0.90,    -341.72),
         (1.00,	 -489.52),
@@ -522,14 +521,17 @@ error_actual = [math.exp(pow(period,-2))*(1.0/pow(abs(i/100),1)) for period,i in
 #error_actual = [period*period*period*pow(i,1.0/pow(period,3.0))*math.exp(-pow(period,2.0)/(2.0*variance))/math.sqrt(2.0*math.pi*variance) for period,i in runs if period == T_actual][0]
 
 # plot data
-plot_name = 'int_diff_v_T (conv='+str(conv_crit)+').png'
-plt.figure()
-plt.plot(Ts,errors,'k.-')
-plt.plot(T_actual,error_actual,'r*')
-plt.xlabel(r'$T$', fontsize=18)
-plt.ylabel(y_label, fontsize=18)
-plt.title(r'$converged \,\,to \colon \, $'+str(conv_crit)+r'$; \quad T_{actual}= \,$'+str(T_actual))
-print 'saving figure...'
-plt.savefig(plot_name, dpi=500)
-print 'figure saved: ' + plot_name
-plt.close()
+plot_me = True
+if plot_me:
+    plot_name = 'int_diff_v_T (conv='+str(conv_crit)+').png'
+    plt.figure()
+    plt.plot(Ts,errors,'k.-')
+    plt.plot(T_actual,error_actual,'r*')
+    plt.xlabel(r'$T$', fontsize=18)
+    plt.ylabel(y_label, fontsize=18)
+    plt.title(r'$converged \,\,to \colon \, $'+str(conv_crit)+r'$; \quad T_{actual}= \,$'+str(T_actual))
+    print ('saving figure...')
+    plt.savefig(plot_name, dpi=500)
+    print ('figure saved: ' + plot_name)
+    plt.close()
+
