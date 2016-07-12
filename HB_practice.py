@@ -280,7 +280,7 @@ def plot_eigenvalues(A, auto_open=False):
             title += str(np.around(Im_parts[k],decimals_to_print))+'i'
         if not k == len(eigs)-1:
             title += ',\quad'
-    plt.title('$eig\\left(D_{HB}\\right) \, = \,'+title+'$', y=1.03)
+    plt.title('$eig\\left(D_{HB}\\right) \, = \,'+title+'$', y=1.03, fontsize=8)
     plt.grid()
     # save plot and close
     print('\n\t'+'saving final image...', end='')
@@ -324,14 +324,187 @@ def compute_cost(t_HB, f_HB, omegas, delta_t, actual_omegas):
     cost = np.linalg.norm(f_HB_plus_T_plus_dt-f_HB_plus_dt)
     return cost
 #-----------------------------------------------------------------------------#
+def HB_omgea_check(omegas_given):
+    '''
+    this subroutine reads in a list of K angular frequencies and tells the user
+    whether the values given will lead to an ill-conditioned HB operator, with
+    less than full rank, when the N time instances are uniformly spaced across
+    the period corresponding to the lowest angular frequency.
+    if inadmissible frequencies are found, the user will be given a range (or 
+    ranges) of feasible values that could be substituted in its place.
+    '''
+    import math
+    from matplotlib import pyplot as plt
+    # total number of given angular frequencies
+    K = len(omegas_given)
+    # find the ccorresponding number of columns
+    N = 2*K + 1
+    # for notational simplicity later, note the first omega
+    omega_1 = omegas_given[0]
+    # initialize an empty list of to hold dictionaries for inadmissible frequency values
+    omegas = []
+    for i in range(K):          # i = 0,1,...,K-1
+        # current omega
+        omega_i = omegas_given[i]
+        # range constraints: the i-th frequency must be stricty less than the 
+        # one that comes after it and strictly greater than the one that comes 
+        # before. the first frequency must be strictly greater than zero. 
+        # Likewise, the upper bound for the last frequency is infinity.
+        if i == 0:
+            lower_bound = 0.0
+        else:
+            lower_bound = omegas_given[i-1]
+        if i == K-1:
+            upper_bound = math.inf
+        else:
+            upper_bound = omegas_given[i+1]
+        # find the inadmissible ratios due to Cases 1 and 2 
+        inadmissible_ratios = []        # all bad ratios
+        inadmissible_values_case1 = []  # all bad values for Case 1
+        inadmissible_values_case2 = []  # all bad values for Case 2
+        inadmissible_points = []        # feasibly bad values (within bounds)
+        case1_max = 0.0
+        case2_max = 0.0
+        n_multiples = 4             # for Case 1
+        no_of_Ns = 10               # for Case 2
+        if i > 0:
+            # find the inadmissible ratios due to Case 1 (when the i-th column
+            # ends up being real and, therefore, equals its complex conjugate)
+            # run through the first no_of_Ns periods of N
+            for m in range(1,n_multiples+1):
+                # compute the inadmissible ratio for this multiple
+                bad_ratio = m*(K+0.5)
+                # compute the inadmissible rank of this multiple
+                if m%2 == 0:            # even m
+                    bad_rank = N-2
+                else:                   # odd m
+                    bad_rank = N-1
+                # compute the corresponding inadmissible value of this omega
+                bad_value = bad_ratio*omega_1
+                # if the inadmissible value occurs within the bounds, record it
+                # as an inadmissible point (bad_value, bad_ratio, bad_rank)
+                if bad_value > lower_bound and bad_value < upper_bound:
+                    inadmissible_points.append((bad_value, bad_ratio, bad_rank))
+                # record the (inadmissible ratio, the corresponding bad rank)
+                inadmissible_ratios.append((bad_ratio, bad_rank))
+                # record the (inadmissible value, the corresponding bad rank)
+                inadmissible_values_case1.append(bad_value)
+            # find the greatest inadmissible value due to Case 1
+            case1_max = max(inadmissible_values_case1)
+            # find the inadmissible ratios and values for Case 2 (two arbitrary 
+            # columns in the matrix end up being equal due to N periodicty)
+            test_omegas = list(omegas_given)
+            # remove the current omega from the list and mirror with negation
+            test_omegas.pop(i)
+            test_omegas = [-test_omegas[-i] for i in range(1,K)] + test_omegas
+            # run through the test omegas
+            for test_omega in test_omegas:
+                for r in range(-no_of_Ns,no_of_Ns):
+                    # compute the inadmissible ratio for this combination
+                    bad_ratio = test_omega/omega_1 + r*N
+                    # compute the corresponding inadmissible value
+                    bad_value = bad_ratio*omega_1
+                    # for Case two the rank is alway the same
+                    bad_rank = N-2
+                    # if the inadmissible value occurs within the bounds, record it
+                    # as an inadmissible point (bad_value, bad_ratio, bad_rank)
+                    if bad_value > lower_bound and bad_value < upper_bound:
+                        inadmissible_points.append((bad_value, bad_ratio, bad_rank))
+                    # record the (inadmissible ratio, the corresponding bad rank)
+                    inadmissible_ratios.append((bad_ratio, bad_rank))
+                    # record the (inadmissible value, the corresponding bad rank)
+                    inadmissible_values_case2.append(bad_value)
+            # find the greatest inadmissible value due to Case 2
+            case2_max = max(inadmissible_values_case2)
+        # for the plotting of the K-th omega, set a "upper bound" that 
+        # corresponds the minimum inadmissible value from both cases
+        K_upper_bound = min(case1_max, case2_max)
+        # sort the tuples created for inadmissible points by the actual values
+        inadmissible_points = sorted(inadmissible_points, key=lambda point_tuple: point_tuple[0])
+        # create a dictionary for this omega and fill in the known values
+        omega_dict = {'value': omega_i,  
+                      'lower bound': lower_bound,
+                      'upper bound': upper_bound,
+                      'K upper bound': K_upper_bound,
+                      'inadmissible ratios': inadmissible_ratios,
+                      'inadmissible points': inadmissible_points
+                      }
+        # append this dictionary to the list of omegas
+        omegas.append(omega_dict)
+        
+    # for each of the given angular frequencies, plot the inadmissible 
+    # values and the corresponding degenerate rank
+    for i in range(K):
+        # extract the inadmissible points for this angular frequency
+        bad_points = [point_tuple[0] for point_tuple in omegas[i]['inadmissible points']]
+        # extract the corresponding ranks
+        bad_ranks = [point_tuple[2] for point_tuple in omegas[i]['inadmissible points']]
+        # initialize the boolean
+        inadmissible_value = False
+        # check to see if the current value is inadmissible (this is a boolean)
+        if bad_points:
+            inadmissible_value = omegas[i]['value'] in bad_points
+            if inadmissible_value:
+                bad_index = bad_points.index(omegas[i]['value'])
+                bad_rank = bad_ranks[bad_index]
+        # extract upper and lower bounds and compute the range
+        lower_bound = omegas[i]['lower bound']
+        upper_bound = omegas[i]['upper bound']
+        if upper_bound == math.inf:
+            upper_bound = omegas[i]['K upper bound']
+            bad_points = [point for point in bad_points if point < upper_bound]
+            bad_ranks = bad_ranks[:len(bad_points)]
+        admissible_range = upper_bound-lower_bound
+        # full rank
+        full_rank = N
+        
+        # plot everything
+        plot_name = 'omega #'+str(i+1)+' - inadmissible_values'
+        auto_open = False
+        plt.figure(plot_name)
+        if bad_points:
+            plt.plot(bad_points, bad_ranks, 'ko', label='$inadmissible$')
+            plt.vlines(bad_points, [0.0]*len(bad_ranks), bad_ranks, 'k')
+        plt.plot([lower_bound, upper_bound],[full_rank]*2,'g--',label='$full \,\, rank$')
+        plt.vlines(lower_bound, 0.0, 1.25*N, 'm', '--', label='$bounds$')
+        if omegas[i]['upper bound'] != math.inf:
+            plt.vlines(upper_bound, 0.0, 1.25*N, 'm', '--')
+        if inadmissible_value:
+            plt.plot(omegas[i]['value'], bad_rank, 'ro', label='$given \,\, value$')
+            plt.vlines(omegas[i]['value'], 0.0, bad_rank, 'r','--')
+        else:
+            plt.plot(omegas[i]['value'], full_rank, 'bo', label='$given \,\, value$')
+            plt.vlines(omegas[i]['value'], 0.0, full_rank, 'b','--')
+        plt.xlabel('$\omega_'+str(i+1)+'$', fontsize=16)
+        plt.ylabel('$rank ( F^{-1} ) $', fontsize=16)
+        if bad_points:
+            plt.title('$\omega_'+str(i+1)+'='+str(omegas[i]['value'])+'\quad inadmissible \,\,points:\,\,'+str(bad_points)[1:-1]+'$')
+        else:
+            plt.title('$\omega_'+str(i+1)+'='+str(omegas[i]['value'])+'\quad (no \,\, inadmissible \,\, points \,\, within \,\, bounds)$')
+        plt.xlim(lower_bound-0.25*admissible_range, upper_bound+0.25*admissible_range)
+        plt.ylim(0.0, 1.25*N)
+        plt.legend(loc='best')
+        
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
 
+    return omegas
+#-----------------------------------------------------------------------------#
+        
 ###############
 # user inputs #
 ###############
 
 # angular frequencies in the underlying signal
-actual_omegas = [1.0, 2.5]
-actual_omegas = [1.0, 2.1, 6.0]
+actual_omegas = [1.0, 7.5]
+actual_omegas = [1.0, 2.1, 3.6]
 #actual_omegas = [9.8, 24.5]
 #actual_omegas = [9.8, 39.2]
 # angular frequencies input by the user to the HB method
@@ -340,7 +513,7 @@ omegas = copy.copy(actual_omegas)
 
 # select the time discretization to use for specifying the of time instances
 time_discretization = 'use_Nyquist'
-#time_discretization = 'use_T1'
+time_discretization = 'use_T1'
 
 #######################################
 # actual periods of the two solutions #
@@ -1172,12 +1345,24 @@ print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
 print('\n-a look at the HB operator:\n')
 print('\tomegas =', omegas)
 print('\n\tK = '+str(len(omegas)))
-print('\n\tN = '+str(2*len(omegas)+1))
+N = 2*len(omegas)+1
+print('\n\tN = '+str(N))
 print('\n\tD_HB = ', str(np.around(D_HB,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
 print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
 print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
-#E_inv = HB_forward_transform_matrix(omegas, time_discretization)
-#print('\n\tE_inv = ', str(np.around(E_inv,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
+E_inv = HB_forward_transform_matrix(omegas, time_discretization)
+N_E_inv = [[0]*N for i in range(N)]
+N_E_inv = np.zeros((N,N),dtype=np.complex_)
+for i in range(N):
+    for j in range(N):
+        N_E_inv[i][j] = np.round(N*E_inv[i][j],2)
+stringed_E_inv = []
+for i in range(N):
+    realed_row = [np.real_if_close(N_E_inv[i][j],1000) for j in range(N)]        
+    stringed_row = ''.join([char for char in str(realed_row) if char not in 'array()'])
+    stringed_E_inv.append(stringed_row)
+print('\n\tE_inv = (1/'+str(N)+')'+str(stringed_E_inv)[2:-2].replace("', '",'\n\t'+' '*13).replace(', ','\t'))
+print('\n\trank(E_inv) = ',np.linalg.matrix_rank(E_inv))
 
 # print both TA and HB average function values to the screen
 print('\n-comparing the average value of the time-accurate solution (over \n'
@@ -1185,5 +1370,7 @@ print('\n-comparing the average value of the time-accurate solution (over \n'
        +' frequencies) to the average value of the harmonic-balance solution \n'
        +' (over the '+str(2*len(omegas)+1)+' time instances):')
 print('\n\tf_ave (time-accurate) = '+str(round(f_ave_TA,3)))
-print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3))+'\n')
+print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3)))
 
+# inadmissibiltiy check
+omega_dicts = HB_omgea_check(omegas)

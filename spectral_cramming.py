@@ -58,7 +58,7 @@ f = np.sin(2.0*np.pi*2.0*t/T) \
 angular_frequency = 2.0*np.pi/T
 
 # specific frequencies
-specific_frequencies = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+specific_frequencies = [2.1, 5.1]
 #specific_frequencies = [angular_frequency, 2*angular_frequency]
 
 # the DFT
@@ -130,7 +130,7 @@ else:
     full_F_f = np.zeros(int(np.ceil(N/2.0)), dtype=complex)
 
 freq_index = 0
-for i in list(range(N/2)):
+for i in range(int(np.floor(N/2))):
     if i == int(freqs[freq_index]):
         full_F_f[i] = short_F_f[freq_index]
         if freq_index < len(freqs)-1:

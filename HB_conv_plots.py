@@ -6,9 +6,8 @@ Created on Sun May 15 04:34:36 2016
 """
 from matplotlib import pyplot as plt
 
-######
+#-----------------------------------------------------------------------------#
 # trends pseudo-timestep size and iterations to convergence for HB
-######
 
 conv_crit = 1e-5            # convergence criteria
 omegas = [1.3, 2.5]         # given angularfreqs
@@ -109,3 +108,5 @@ if plot_me:
     plt.savefig(plot_name, dpi=500)
     print ('figure saved: ' + plot_name)
     plt.close()
+#-----------------------------------------------------------------------------#    
+    
