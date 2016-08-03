@@ -11,6 +11,7 @@ from matplotlib import animation         # for specifying the writer
 import numpy as np
 import webbrowser
 import copy
+from functools import reduce
 
 # turn off interactive mode, so that plot windows don't pop up
 plt.ioff()
@@ -359,14 +360,13 @@ def HB_omgea_check(omegas_given):
         else:
             upper_bound = omegas_given[i+1]
         # find the inadmissible ratios due to Cases 1 and 2 
-        inadmissible_ratios = []        # all bad ratios
         inadmissible_values_case1 = []  # all bad values for Case 1
         inadmissible_values_case2 = []  # all bad values for Case 2
         inadmissible_points = []        # feasibly bad values (within bounds)
         case1_max = 0.0
         case2_max = 0.0
         n_multiples = 4             # for Case 1
-        no_of_Ns = 10               # for Case 2
+        no_of_Ns = 4                # for Case 2
         if i > 0:
             # find the inadmissible ratios due to Case 1 (when the i-th column
             # ends up being real and, therefore, equals its complex conjugate)
@@ -385,8 +385,6 @@ def HB_omgea_check(omegas_given):
                 # as an inadmissible point (bad_value, bad_ratio, bad_rank)
                 if bad_value > lower_bound and bad_value < upper_bound:
                     inadmissible_points.append((bad_value, bad_ratio, bad_rank))
-                # record the (inadmissible ratio, the corresponding bad rank)
-                inadmissible_ratios.append((bad_ratio, bad_rank))
                 # record the (inadmissible value, the corresponding bad rank)
                 inadmissible_values_case1.append(bad_value)
             # find the greatest inadmissible value due to Case 1
@@ -410,8 +408,6 @@ def HB_omgea_check(omegas_given):
                     # as an inadmissible point (bad_value, bad_ratio, bad_rank)
                     if bad_value > lower_bound and bad_value < upper_bound:
                         inadmissible_points.append((bad_value, bad_ratio, bad_rank))
-                    # record the (inadmissible ratio, the corresponding bad rank)
-                    inadmissible_ratios.append((bad_ratio, bad_rank))
                     # record the (inadmissible value, the corresponding bad rank)
                     inadmissible_values_case2.append(bad_value)
             # find the greatest inadmissible value due to Case 2
@@ -419,19 +415,20 @@ def HB_omgea_check(omegas_given):
         # for the plotting of the K-th omega, set a "upper bound" that 
         # corresponds the minimum inadmissible value from both cases
         K_upper_bound = min(case1_max, case2_max)
+        # for the final omega, discard any inadmissible points which exceed the
+        # "upper bound" for K
+        inadmissible_points = [point_tuple for point_tuple in inadmissible_points if point_tuple[0] <= K_upper_bound]
         # sort the tuples created for inadmissible points by the actual values
         inadmissible_points = sorted(inadmissible_points, key=lambda point_tuple: point_tuple[0])
         # create a dictionary for this omega and fill in the known values
-        omega_dict = {'value': omega_i,  
+        omega_dict = {'value': omega_i,
+                      'valid': True,
                       'lower bound': lower_bound,
                       'upper bound': upper_bound,
                       'K upper bound': K_upper_bound,
-                      'inadmissible ratios': inadmissible_ratios,
-                      'inadmissible points': inadmissible_points
-                      }
+                      'inadmissible points': inadmissible_points}
         # append this dictionary to the list of omegas
         omegas.append(omega_dict)
-        
     # for each of the given angular frequencies, plot the inadmissible 
     # values and the corresponding degenerate rank
     for i in range(K):
@@ -447,34 +444,41 @@ def HB_omgea_check(omegas_given):
             if inadmissible_value:
                 bad_index = bad_points.index(omegas[i]['value'])
                 bad_rank = bad_ranks[bad_index]
+        # set the validity flag in the dictionary
+        omegas[i]['valid'] = not inadmissible_value
         # extract upper and lower bounds and compute the range
         lower_bound = omegas[i]['lower bound']
         upper_bound = omegas[i]['upper bound']
         if upper_bound == math.inf:
             upper_bound = omegas[i]['K upper bound']
-            bad_points = [point for point in bad_points if point < upper_bound]
-            bad_ranks = bad_ranks[:len(bad_points)]
         admissible_range = upper_bound-lower_bound
-        # full rank
+        # full rank is N
         full_rank = N
-        
-        # plot everything
+        # plotting preliminaries
         plot_name = 'omega #'+str(i+1)+' - inadmissible_values'
         auto_open = False
         plt.figure(plot_name)
+        # if there are bad points, plot them as vertical lines
         if bad_points:
             plt.plot(bad_points, bad_ranks, 'ko', label='$inadmissible$')
             plt.vlines(bad_points, [0.0]*len(bad_ranks), bad_ranks, 'k')
+        # plot a dashed green denoting full rank
         plt.plot([lower_bound, upper_bound],[full_rank]*2,'g--',label='$full \,\, rank$')
+        # plot a vertical dashed line denoting the lower bound        
         plt.vlines(lower_bound, 0.0, 1.25*N, 'm', '--', label='$bounds$')
-        if omegas[i]['upper bound'] != math.inf:
+        # if not the last omega, plot a vertical dashed line at the upper bound
+        if i != K-1:
             plt.vlines(upper_bound, 0.0, 1.25*N, 'm', '--')
+        # plot the given value with the corresponding rank
         if inadmissible_value:
+            # if the given value yields less than full rank
             plt.plot(omegas[i]['value'], bad_rank, 'ro', label='$given \,\, value$')
             plt.vlines(omegas[i]['value'], 0.0, bad_rank, 'r','--')
         else:
+            # if the given value is fine
             plt.plot(omegas[i]['value'], full_rank, 'bo', label='$given \,\, value$')
             plt.vlines(omegas[i]['value'], 0.0, full_rank, 'b','--')
+        # plot labels, axes, title, legend
         plt.xlabel('$\omega_'+str(i+1)+'$', fontsize=16)
         plt.ylabel('$rank ( F^{-1} ) $', fontsize=16)
         if bad_points:
@@ -484,7 +488,6 @@ def HB_omgea_check(omegas_given):
         plt.xlim(lower_bound-0.25*admissible_range, upper_bound+0.25*admissible_range)
         plt.ylim(0.0, 1.25*N)
         plt.legend(loc='best')
-        
         # save plot and close
         print('\n\t'+'saving final image...', end='')
         file_name = plot_name+'.png'
@@ -494,7 +497,6 @@ def HB_omgea_check(omegas_given):
         # open the saved image, if desired
         if auto_open:
             webbrowser.open(file_name)
-
     return omegas
 #-----------------------------------------------------------------------------#
         
@@ -503,7 +505,7 @@ def HB_omgea_check(omegas_given):
 ###############
 
 # angular frequencies in the underlying signal
-actual_omegas = [1.0, 7.5]
+actual_omegas = [1.5, 2.5]
 actual_omegas = [1.0, 2.1, 3.6]
 #actual_omegas = [9.8, 24.5]
 #actual_omegas = [9.8, 39.2]
@@ -514,6 +516,13 @@ omegas = copy.copy(actual_omegas)
 # select the time discretization to use for specifying the of time instances
 time_discretization = 'use_Nyquist'
 time_discretization = 'use_T1'
+
+##############################################################################
+# inadmissibiltiy check: are these omegas compatible with T1 discretization? #
+##############################################################################
+
+# omega_dicts contains all the constraints on each given omega
+omega_dicts = HB_omgea_check(omegas)
 
 #######################################
 # actual periods of the two solutions #
@@ -1006,9 +1015,32 @@ for k in range(max_pseudo_steps):
             print('\tpseudo step: '+str(round(step_size,3)))
             tau += delta_tau
         B = step_size*I
+        
+        #  or, create your own B (n.b. for linear systems, optimal B = inv(A))
+        # attempt to invert the opertor by inverting the eigendecomposition
+        # (except replace the zero eigenvalue with omega_1)
+        E_inv = HB_forward_transform_matrix(omegas, time_discretization)
+        # create a list of all N discrete frequencies (but replace 0 with w_1)
+        # w = [w_1, w_1, ..., w_K, -w_K, ..., -w_1]
+        w = [omegas[0]]+omegas+[-omegas[-(i+1)] for i in range(len(omegas))]
+        # create the diagonal matrix holding the recciprocal frequencies
+        w_imag = [1.0/(1j*w_i) for w_i in w]
+        almost_C_inv = np.diag(w_imag)
+        # take the inverse of the matrix E
+        E = np.linalg.inv(E_inv)
+        # compute the approximate inverse operator (B = E*C*E_inv)
+        # is always real...why?
+        '''
+        B = np.real(reduce(lambda x,y: np.dot(x,y), [E,almost_C_inv,E_inv]))
+        print('det(B) = ',np.linalg.det(B))
+        B = step_size*B
+        '''
+        
     if picard_iteration:
+        print()
         B = np.linalg.inv(D_HB)         # inverse of HB operator
-    
+        B = np.linalg.pinv(D_HB)        # pseudo-inverse of HB operator
+        
     error = np.dot(B,residual)
     
     # if convergence criteria is met, end, else, update solution
@@ -1350,6 +1382,7 @@ print('\n\tN = '+str(N))
 print('\n\tD_HB = ', str(np.around(D_HB,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
 print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
 print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
+print('\trank(D_HB) = ',np.linalg.matrix_rank(D_HB),'\n')
 E_inv = HB_forward_transform_matrix(omegas, time_discretization)
 N_E_inv = [[0]*N for i in range(N)]
 N_E_inv = np.zeros((N,N),dtype=np.complex_)
@@ -1371,6 +1404,6 @@ print('\n-comparing the average value of the time-accurate solution (over \n'
        +' (over the '+str(2*len(omegas)+1)+' time instances):')
 print('\n\tf_ave (time-accurate) = '+str(round(f_ave_TA,3)))
 print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3)))
+print()
 
-# inadmissibiltiy check
-omega_dicts = HB_omgea_check(omegas)
+

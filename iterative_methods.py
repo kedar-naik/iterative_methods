@@ -47,8 +47,8 @@ def CG_method(A, b):
     r_norm = [np.linalg.norm(r[0])]     # starts at index 0
     
     # print the starting residual norm to the screen
-    print "\n\t Solution Computed Using Conjugate Gradient Method \n"
-    print "||r_0|| = ", r_norm[0]    
+    print("\n\t Solution Computed Using Conjugate Gradient Method \n")
+    print("||r_0|| = ", r_norm[0])   
     
     # stopping criterion (maximum iterations)
     max_iter = 100
@@ -90,8 +90,8 @@ def CG_method(A, b):
         orders_fallen = math.log10(r_norm[0]) - math.log10(r_norm[i])
 
         # print the progress to the screen
-        print "( iteration:", i, ") ||r|| = %.10f (%.2f orders of magnitude)" \
-              % (r_norm[i], orders_fallen)
+        print("( iteration:", i, ") ||r|| = %.10f (%.2f orders of magnitude)" \
+              % (r_norm[i], orders_fallen))
         
         # plot the convergence to the screen
         pylab.semilogy(range(i+1), r_norm, 'ko-')
@@ -109,20 +109,20 @@ def CG_method(A, b):
         if r_norm[i] < eps:
             
             # print the solution to the screen
-            print "\n Conjugate Gradient Method has converged."
-            print "  -No. of iterations: ", i
-            print "  -Solution: x = ", x[i]
+            print("\n Conjugate Gradient Method has converged.")
+            print("  -No. of iterations: ", i)
+            print("  -Solution: x = ", x[i])
             
             break
 
         else:
             
             if i == max_iter:
-                print "The problem has not converged." 
-                print "The maximum number of iterations has been reached."
-                print "If the problem appears to be converging, consider \
-                increasing the maximum number of iterations in line 52 \
-                of iterative_methods.py"
+                print("The problem has not converged.")
+                print("The maximum number of iterations has been reached.")
+                print("If the problem appears to be converging, consider" \
+                "increasing the maximum number of iterations in line 52" \
+                "of iterative_methods.py")
             continue
     
     # pylab interactive mode off (this keeps the plot from closing)
@@ -204,8 +204,8 @@ def BCG_method(A, b):
     r_norm = [np.linalg.norm(r[0])]     # starts at index 0
     
     # print the starting residual norm to the screen
-    print "\n\t Solution Computed Using BiConjugate Gradient Method \n"
-    print "||r_0|| = ", r_norm[0]    
+    print("\n\t Solution Computed Using BiConjugate Gradient Method \n")
+    print("||r_0|| = ", r_norm[0])
     
     # stopping criterion (maximum iterations)
     max_iter = 100
@@ -221,8 +221,8 @@ def BCG_method(A, b):
         
         # make sure this dot product is not equal to zero
         if rho[i-1] == 0:
-            print "The Biconjugate Gradient method is quitting in order to \
-                  prevent a divide-by-zero error"
+            print ("The Biconjugate Gradient method is quitting in order to" \
+                  "prevent a divide-by-zero error")
             import sys
             sys.exit()
                    
@@ -258,8 +258,8 @@ def BCG_method(A, b):
         orders_fallen = math.log10(r_norm[0]) - math.log10(r_norm[i])
 
         # print the progress to the screen
-        print "( iteration:", i, ") ||r|| = %.10f (%.2f orders of magnitude)" \
-              % (r_norm[i], orders_fallen)
+        print("( iteration:", i, ") ||r|| = %.10f (%.2f orders of magnitude)" \
+              % (r_norm[i], orders_fallen))
         
         # plot the convergence to the screen
         pylab.semilogy(range(i+1), r_norm, 'ko-')
@@ -277,20 +277,20 @@ def BCG_method(A, b):
         if r_norm[i] < eps:
             
             # print the solution to the screen
-            print "\n BiConjugate Gradient Method has converged."
-            print "  -No. of iterations: ", i
-            print "  -Solution: x = ", x[i]
+            print("\n BiConjugate Gradient Method has converged.")
+            print("  -No. of iterations: ", i)
+            print("  -Solution: x = ", x[i])
             
             break
 
         else:
             
             if i == max_iter:
-                print "The problem has not converged." 
-                print "The maximum number of iterations has been reached."
-                print "If the problem appears to be converging, consider \
-                increasing the maximum number of iterations in line 209 \
-                of iterative_methods.py"
+                print("The problem has not converged.")
+                print("The maximum number of iterations has been reached.")
+                print("If the problem appears to be converging, consider" \
+                "increasing the maximum number of iterations in line 209" \
+                "of iterative_methods.py")
             continue
     
     # pylab interactive mode off (this keeps the plot from closing)
@@ -298,3 +298,40 @@ def BCG_method(A, b):
     pylab.show()
     
     return x[i]
+
+#-----------------------------------------------------------------------------#
+def myGaussianElimination(A):
+    '''
+    this function performs Gaussian Elimination on the given m x m matrix. it 
+    returns the lower- and upper-triangular decomposition
+    '''
+    import numpy as np
+    
+    # recast A as complex
+    A = A.astype('complex_')
+    
+    # find the dimensions of the matrix
+    m = np.shape(A)[0]
+    n = np.shape(A)[1]
+    
+    # check to make sure it's square
+    assert (n == m), 'MATRIX MUST BE SQUARE TO PERFORM GAUSS ELIMINATION!'
+        
+    # initialize the lower- and upper-triangular matrices (L=I, U=A)
+    L = np.eye(m, dtype=np.complex_)
+    U = A
+    
+    # run across the k columns
+    for k in range(m-1):
+        # run down the rows below the k-th row
+        for j in range(k+1,m):
+            # fill in the correct multiplier in L (pp. 148-151 in Trefethen)
+            L[j][k] = U[j][k]/U[k][k]
+            # subtract off from the rows below k the correct multiple of row k
+            U[j][k:m] = U[j][k:m] - L[j][k]*U[k][k:m]
+    
+    return L,U
+#-----------------------------------------------------------------------------#
+    
+    
+    
