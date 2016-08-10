@@ -300,38 +300,203 @@ def BCG_method(A, b):
     return x[i]
 
 #-----------------------------------------------------------------------------#
-def myGaussianElimination(A):
+def my_gaussian_elimination(A, partial_pivoting=True):
     '''
-    this function performs Gaussian Elimination on the given m x m matrix. it 
-    returns the lower- and upper-triangular decomposition
+    this function performs Gaussian Elimination with partial pivioting on the 
+    given m x m matrix. it returns the lower- and upper-triangular 
+    decomposition (L and U) along with the corresponding permutation matrix, P. 
+    if partial pivoting is turned off, then only L and U are returned.
     '''
     import numpy as np
-    
-    # recast A as complex
-    A = A.astype('complex_')
-    
+    # extact the data type of A, change to float if necessary
+    A_type = A.dtype
+    if A_type != 'complex_':
+        A_type = 'float64'
+        A = A.astype(A_type)
     # find the dimensions of the matrix
     m = np.shape(A)[0]
     n = np.shape(A)[1]
-    
     # check to make sure it's square
-    assert (n == m), 'MATRIX MUST BE SQUARE TO PERFORM GAUSS ELIMINATION!'
-        
+    assert (n == m), '\n\n\tMATRIX MUST BE SQUARE TO PERFORM GAUSS ' + \
+                     'ELIMINATION! \n'+\
+                     '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
+                     '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
     # initialize the lower- and upper-triangular matrices (L=I, U=A)
-    L = np.eye(m, dtype=np.complex_)
+    L = np.eye(m, dtype=A_type)
     U = A
-    
+    if partial_pivoting:
+        P = np.eye(m, dtype=A_type)
     # run across the k columns
     for k in range(m-1):
+        if partial_pivoting:
+            # find the maximum of the possible pivots
+            possible_pivots = [abs(U[row_index][k]) for row_index in range(k,m)]
+            # find the row index that's going to get swapped
+            i = k + possible_pivots.index(max(possible_pivots))
+            # interchange rows i and k in U
+            row_k = np.copy(U[k][k:m])   # copy row k
+            U[k][k:m] = U[i][k:m]             # paste row i in the place of row k
+            U[i][k:m] = row_k            # paste row k in the place of row i
+            # do the same thing for L
+            row_k = np.copy(L[k][:k])     # copy row k
+            L[k][:k] = L[i][:k]         # paste row i in the place of row k
+            L[i][:k] = row_k              # paste row k in the place of row i
+            # do the same thing for P
+            row_k = np.copy(P[k])   # copy row k
+            P[k] = P[i]             # paste row i in the place of row k
+            P[i] = row_k            # paste row k in the place of row i
         # run down the rows below the k-th row
-        for j in range(k+1,m):
+        for j in range(k+1,m):            
             # fill in the correct multiplier in L (pp. 148-151 in Trefethen)
             L[j][k] = U[j][k]/U[k][k]
             # subtract off from the rows below k the correct multiple of row k
             U[j][k:m] = U[j][k:m] - L[j][k]*U[k][k:m]
-    
-    return L,U
+    # return the desired decomposition
+    if partial_pivoting:
+        return P, L, U
+    else:
+        return L, U
 #-----------------------------------------------------------------------------#
+def my_back_substitution(U,b):
+    '''
+    this subroutine implements the back substitution algorithm. it solves the 
+    system Ux=b, where U is upper-triangular
+    '''
+    import numpy as np
+    # find the dimensions of the matrix
+    m = np.shape(U)[0]
+    n = np.shape(U)[1]
+    # check to make sure it's square
+    assert (n == m), '\n\n\tMATRIX MUST BE SQUARE AND UPPER-TRIANGULAR TO ' + \
+                     'PERFORM BACK SUBSTITUTION!' +\
+                     '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
+                     '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
+    # initialize the solution array
+    x = np.zeros((m,1))
+    # start back substitution
+    for i in range(m-1,-1,-1):
+        x[i] = b[i]
+        for j in range(i+1,m):
+            x[i] -= U[i][j]*x[j]
+        x[i] /= U[i][i]
+    # return the solution
+    return x
+#-----------------------------------------------------------------------------#
+def my_forward_substitution(L,b):
+    '''
+    this subroutine implements the forward substitution algorithm. it solves 
+    the system Ly=b, where L is lower-triangular
+    '''
+    import numpy as np
+    # find the dimensions of the matrix
+    m = np.shape(L)[0]
+    n = np.shape(L)[1]
+    # check to make sure it's square
+    assert (n == m), '\n\n\tMATRIX MUST BE SQUARE AND LOWER-TRIANGULAR TO ' + \
+                     'PERFORM FORWARD SUBSTITUTION!' +\
+                     '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
+                     '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
+    # initialize the solution array
+    y = np.zeros((m,1))
+    # start the forward solve
+    for i in range(m):
+        y[i] = b[i]
+        for j in range(i):
+            y[i] -= L[i][j]*y[j]
+        y[i] /= L[i][i]
+    # return the solution
+    return y
+#-----------------------------------------------------------------------------#
+def my_GE_solve(A,b):
+    '''
+    this subroutine solves a system Ax=b by means of gauss elimination. first,
+    the matrix A is decomposed into PA=LU. then, the system that needs to be
+    solved is PAx=Pb, which is the same as LUx=Pb. let y=Ux. now the system is
+    Ly=Pb. solve for y. then find x by solving Ux=y. n.b. b can be a column 
+    vector or a matrix. if it's a matrix, each column is treated independently.
+    '''
+    import numpy as np
+    # find PA=LU using Gaussian Elimination with Partial Pivoting
+    P, L, U = my_gaussian_elimination(A)
+    # find the number of rows and columns in b
+    no_of_rows = b.shape[0]
+    no_of_columns = b.shape[1]
+    # solve a new system for each column in b
+    for j in range(no_of_columns):
+        # extract the j-th column of b
+        b_j = np.array([[b[i][j]] for i in range(no_of_rows)])
+        # permute b_j to get the new RHS
+        Pb = np.dot(P,b_j)
+        # find y by solving the lower-triangular system Ly=Pb
+        y = my_forward_substitution(L,Pb)
+        # find x by solving the upper-triangular system Ux=y
+        x_j = my_back_substitution(U,y)
+        # append this solution to the previous column
+        if j == 0:
+            x = x_j
+        else:
+            x = np.hstack((x,x_j))
+    # return the solution
+    return x
+#-----------------------------------------------------------------------------#
+def my_inv(A):
+    '''
+    this subroutine returns the inverse of the square, nonsingular matrix A
+    using gaussian elimination and an identity matrix
+    '''
+    import numpy as np
+    # find the dimensions of the matrix
+    m = np.shape(A)[0]
+    n = np.shape(A)[1]
+    # check to make sure it's square
+    assert (n == m), '\n\n\tMATRIX MUST BE SQUARE AND NONSINGULAR TO ' + \
+                     'HAVE AN INVERSE!' +\
+                     '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
+                     '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
+    # find the correct identity matrix
+    I_m = np.eye(m)
+    # solve for the solution of Ax=I
+    A_inv = my_GE_solve(A,I_m)
+    # return the inverse of A
+    return A_inv
+#-----------------------------------------------------------------------------#
+def my_pinv(A):
+    '''
+    this subroutine returns A+, the pseudoinverse of A, where we compute A+ 
+    using the SVD: A = USV* --> A+ = VS+U*, where S+ is a the transpose of the 
+    matrix where the nonzero elements of S are replaced by their reciprocals.
+    '''
+    import numpy as np
+    # compute the SVD
+    U,s,V_star = np.linalg.svd(A)
+    # machine zero
+    machine_zero = np.finfo(float).eps
+    # our threshold for what counts as zero
+    threshold = machine_zero*1e3
+    # take the reciprocal of values higher than the threshold
+    s_threshold_reciprocal = np.zeros(s.shape)
+    for i in range(len(s)):
+        if s[i] > threshold:
+            s_threshold_reciprocal[i] = 1.0/s[i]
+    # form S+ (put thresholded values into a diagonal matrix and transpose it)
+    S_plus = np.transpose(np.diag(s_threshold_reciprocal))
+    # compute the adjoint of U
+    U_star = np.conjugate(np.transpose(U))
+    # undo the adjoint of V
+    V = np.conjugate(np.transpose(V_star))
+    # compute the pseudoinverse
+    A_plus = np.dot(np.dot(V,S_plus),U_star)
+    '''
+    # this method of finding the pseudoinverse, where A+ = inv(A*A)A*, only 
+    # works when A is of full rank
+    # compute the adjoint of A
+    A_star = np.conjugate(np.transpose(A))
+    # compute the pseudoinverse
+    A_plus = np.dot(my_inv(np.dot(A_star,A)),A_star)
+    '''
+    # return the pseudoinverse
+    return A_plus
     
+#-----------------------------------------------------------------------------#
     
     
