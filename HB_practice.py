@@ -6,12 +6,14 @@ Created on Wed Apr 13 01:16:35 2016
 
 import math
 from matplotlib import pyplot as plt
-from time_spectral import myLinspace, myNorm, linearInterp
 from matplotlib import animation         # for specifying the writer
 import numpy as np
 import webbrowser
 import copy
 from functools import reduce
+
+from time_spectral import myLinspace, myNorm, linearInterp
+from iterative_methods import my_inv, my_pinv
 
 # turn off interactive mode, so that plot windows don't pop up
 plt.ioff()
@@ -916,11 +918,11 @@ delta_tau = 0.0783
 #delta_tau = 0.16   # for init guess 10.0
 #delta_tau = 0.27    # for init guess 15.0
 delta_tau = 0.151
-delta_tau = 0.05
+delta_tau = 0.001
 
 # choose a nonlinear iterative scheme
-pseudo_transient_continuation = True
-picard_iteration = False
+pseudo_transient_continuation = False
+picard_iteration = True
 scaled_pseudo_transient_continuation = False
 
 # if scaled pseudo-transient continuation is being used, just make sure that 
@@ -964,6 +966,7 @@ print('computing the harmonic-balance solution...\n')
 D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
 # create a constant-valued initial guess for the HB solution
 f_HB = np.array([init_guess]*len(t_HB)).reshape((len(t_HB),1))
+f_HB = init_guess*np.random.rand(len(t_HB)).reshape((len(t_HB),1))
 # create a list for the solution evolution history
 f_HB_history = [np.copy(f_HB)]
 # create a list for the residual evolution history
@@ -1038,8 +1041,9 @@ for k in range(max_pseudo_steps):
         
     if picard_iteration:
         print()
-        B = np.linalg.inv(D_HB)         # inverse of HB operator
-        B = np.linalg.pinv(D_HB)        # pseudo-inverse of HB operator
+        alpha = 240.0
+        B = my_inv(D_HB)         # inverse of HB operator
+        #B = my_pinv(D_HB)        # orthogonal projector and pseudo-inverse of HB operator
         
     error = np.dot(B,residual)
     
@@ -1055,6 +1059,13 @@ for k in range(max_pseudo_steps):
     else:
         # update solution and append to solution history
         f_HB += error
+        #################################
+        # !!! HARDCODING FOR TESTING !!!!
+        ################################
+        f_HB = np.dot(my_inv(D_HB),func_evaluations) # x_k+1 = inv(A)b(x_k)...should be the same as B=inv(A)
+        f_HB = np.dot(my_pinv(D_HB),func_evaluations) # x_k+1 = pinv(A)b(x_k)...stalls...not sure why
+        f_HB = (1.0-delta_tau)*(np.dot(my_pinv(D_HB),func_evaluations) + np.average(f_HB))+delta_tau*residual# x_k+1 = pinv(A)b(x_k)+<b(x_k)>
+        
         f_HB_history.append(np.copy(f_HB))
         # if the residual is low enough, update the frequencies
         if adjust_omegas:

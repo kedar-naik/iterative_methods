@@ -114,13 +114,14 @@ def whittaker_shannon_interp(t,f,t_int=False):
         f_int.append(sum([f_k*np.sinc((1/delta_t)*(t_i-t_k)) for t_k,f_k in zip(t,f)]))
        
     return (t_int, f_int)
-#-----------------------------------------------------------------------------#
-    
+#-----------------------------------------------------------------------------#    
 # if you don't have a CSV file full of points, define a signal (use fine grid!)
-points = 960
-t = np.linspace(0,2*np.pi,points)
-omegas_actual = [2.0, 3.3]
-f = sum([np.sin(omega*t)+1.5*np.cos(omega*t)**1 for omega in omegas_actual]) + 5
+t_start = 0.0
+t_end = 4*np.pi
+n_points = 6
+t = np.linspace(t_start,t_end,n_points)
+omegas_actual = [2.0]
+f = sum([np.sin(omega*t)+np.cos(omega*t) for omega in omegas_actual]) + 0.5
  
 # otherwise, provide some details about the CSV file and set flag to True
 signal_from_CSV = False
@@ -174,7 +175,7 @@ if signal_from_CSV:
     t = dates
     f = data
     # redefine the number of points
-    points = len(f)
+    n_points = len(f)
     # temporary time vector while i figure out how to 
     t = np.linspace(0,len(f),len(f))
 print('\n\tsignal defined')
@@ -185,7 +186,7 @@ energies = np.absolute(Ff)**2
 print('\n\tDFT and energy spectrum computed')
 
 # sets up the mirrored frequency vector
-omegas = np.fft.fftfreq(points,1/points)
+omegas = np.fft.fftfreq(n_points,1.0/(t_end-t_start))
 
 # filter the spectrum by zeroing out everthing below the cutoff
 Ff_filtered = [Ff[0]] # always include the DC component
@@ -215,7 +216,7 @@ if 2*use_K_frequencies < retained_entry_counter-1:
 
 # extract the frequencies that did not get filtered out (clunky...oh well)
 omegas_filtered = []
-for i in range(points):
+for i in range(n_points):
     if energies_filtered[i] > 0.0:
         omegas_filtered = np.append(omegas_filtered, omegas[i])
 omegas_filtered = [omega for omega in omegas_filtered if omega > 0]
@@ -242,8 +243,8 @@ if forecast == 'N_points':
 # forecasting based on fitting the entire reconstructed signal
 if forecast == 'whole_signal' or use_whittaker_shannon:
     scale_down_fac = 2
-    points = int((t[-1]-t[0])/nyquist_delta_t) 
-    t_nyquist = np.array([t[0]+i*nyquist_delta_t for i in range(points)])
+    n_points = int((t[-1]-t[0])/nyquist_delta_t) 
+    t_nyquist = np.array([t[0]+i*nyquist_delta_t for i in range(n_points)])
 # linearly interpolate the reconstructed signal onto the time points
 f_nyquist = np.interp(t_nyquist,t,f_recon)
 # generate a time grid that is 1.5 times longer than the reconstructed signal
@@ -271,15 +272,17 @@ plt.ylabel('$f(t)$', fontsize=16)
 
 # plot the energy spectrum
 plt.subplot(1,2,2)
-plt.semilogy(np.fft.fftshift(omegas),np.fft.fftshift(energies),'bo',label='$power \, spectrum$')
-plt.vlines(np.fft.fftshift(omegas),[10**np.floor(np.log10(min(energies)))]*points,np.fft.fftshift(energies),'b')
+#plt.semilogy(np.fft.fftshift(omegas),np.fft.fftshift(energies),'bo',label='$power \, spectrum$')
+
+plt.plot(np.fft.fftshift(omegas),np.fft.fftshift(energies),'bo',label='$power \, spectrum$')
+plt.vlines(np.fft.fftshift(omegas),[10**np.floor(np.log10(min(energies)))]*n_points,np.fft.fftshift(energies),'b')
 plt.xlabel('$\omega$', fontsize=16)
 plt.ylabel('$|Ff(\omega)|^2$', fontsize=16)
-
+'''
 # plot the energy spectrum of the filtered Fourier transform
 plt.subplot(1,2,2)
 plt.semilogy(np.fft.fftshift(omegas),np.fft.fftshift(energies_filtered),'ro',label='$filtered \, spectrum$')
-plt.vlines(np.fft.fftshift(omegas),[10**np.floor(np.log10(min(energies)))]*points,np.fft.fftshift(energies_filtered),'r')
+plt.vlines(np.fft.fftshift(omegas),[10**np.floor(np.log10(min(energies)))]*n_points,np.fft.fftshift(energies_filtered),'r')
 if cutoff_active:
     plt.semilogy(np.fft.fftshift(omegas),[energy_cutoff]*len(energies),'r--')
 plt.xlabel('$\omega$', fontsize=16)
@@ -299,3 +302,4 @@ plt.plot(t_nyquist,f_nyquist,'g.',label='$sample \, points$')
 plt.plot(t_long, f_long, 'g-',label='$interpolant$')
 #plt.ylim([min(f), max(f)])
 plt.legend()
+'''
