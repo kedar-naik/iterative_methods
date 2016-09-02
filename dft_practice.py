@@ -5,8 +5,116 @@ Created on Thu Aug 25 19:24:44 2016
 @author: Kedar
 """
 import numpy as np
-
+from matplotlib import pyplot as plt
+#-----------------------------------------------------------------------------#
+def whittaker_shannon_interp(t, f, t_int=False):
+    '''
+    this subroutine implements the Whittaker-Shannon interpolation formula.
+    Input:
+      - abscissas, t (as a list) (leave out last, duplicate point in period)
+      - ordinates, f (as a list) (again, leave out last point, if periodic)
+      - new abscissas, f_int (as a list) (optional! defaults to 10x refinement)
+    Output:
+      - new abscissas, t_int (np array)
+      - interpolated ordinates, f_int (np array)
+    '''
+    import numpy as np
+    # refinment factor for the interpolant. (If there are originally 10 points
+    # but you want the interpolation to be defined on 50 points, then the 
+    # refinement factor is 5.)
+    refine_fac = 4
+    # number of points passed in
+    n = len(t)  
+    # set t_int, if it hasn't been given
+    if type(t_int) == bool:
+        n_int = refine_fac*(n)
+        t_int = np.linspace(t[0],t[-1],n_int)
+    else:
+        n_int = len(t_int)
+    # implementation of the formula
+    delta_t = t[1]
+    f_int = []
+    for t_i in t_int:
+        f_int.append(sum([f_k*np.sinc((1/delta_t)*(t_i-t_k)) for t_k,f_k in zip(t,f)]))
+    return (t_int, f_int)
 #-----------------------------------------------------------------------------# 
+def fourierInterp_given_freqs(x, y, omegas, x_int=False):
+    '''
+    This function interpolates a given set of ordinates and abscissas with a
+    Fourier series that uses a specific set of frequencies. The interpolation 
+    is constructed using coefficients found for the cosine and sine terms by
+    solving a linear system built up from the given abscissas and ordinates.
+    N.B. For this subroutine to work, the angular frequencies must be known 
+        EXACTLY! Otherwise, the interpolant will only pass through the first
+        N=2K+1 points (since the interpolant has only been found using those
+        points). The subroutine isn't broken, you're just giving it bad 
+        information.
+    Input:
+      - abscissas, x (as a list) (leave out last, duplicate point in period)
+      - ordinates, y (as a list) (again, leave out last point, if periodic)
+      - angular frequencies, omegas (as a list)
+      - new abscissas, x_int (as a list) (optional! defaults to 10x refinement)
+    Output:
+      - new abscissas, x_int (as a list)
+      - interpolated ordinates, y_int (as a list)
+      - derivative of the interpolant, dydx_int (as a list)
+    '''
+    import math
+    import numpy as np
+    # refinment factor for the interpolant. (If there are originally 10 points
+    # but you want the Fourier Series to be defined on 50 points, then the 
+    # refinement factor is 5.)
+    refine_fac = 10
+    # number of points passed in
+    n = len(x)                  
+    # if zero has not been included as a frequency, add it
+    if 0 not in omegas:
+        omegas = [0.0] + omegas
+    # total number of frequencies being considered, including the D.C. value
+    K = len(omegas)-1
+    # compute the coefficients by setting up and solving a linear system
+    N = 2*K+1
+    A = np.zeros((N,N))
+    b = np.zeros((N,1))
+    for i in range(N):
+        b[i] = y[i]
+        for j in range(N):
+            if j == 0:
+                A[i][j] = 1
+            else:
+                if j%2 == 1:
+                    A[i][j] = math.cos(omegas[int((j+1)/2)]*x[i])
+                else:
+                    A[i][j] = math.sin(omegas[int(j/2)]*x[i])
+    Fourier_coeffs = np.linalg.solve(A,b)
+    # create separate lists for the cosine and sine coefficients
+    a = []
+    b = [0]
+    for i in range(N):
+        if i==0 or i%2==1:
+            a.append(Fourier_coeffs[i][0])
+        else:
+            b.append(Fourier_coeffs[i][0])
+    # set x_int, if it hasn't been given
+    if type(x_int) == bool:
+        n_int = refine_fac*(n)
+        x_int = np.linspace(x[0],x[-1]+x[1],n_int)
+    else:
+        n_int = len(x_int)
+    # find the actual interpolation
+    y_int = [0.0]*n_int
+    dydx_int = [0.0]*n_int
+    for i in range(n_int):
+        y_int[i] = a[0]        # the "DC" value
+        dydx_int[i] = 0.0      # intialize the summation
+        for j in range(K):
+            y_int[i] += a[j+1]*math.cos(omegas[j+1]*x_int[i]) + \
+                        b[j+1]*math.sin(omegas[j+1]*x_int[i])
+            dydx_int[i] += omegas[j+1]* \
+                           (b[j+1]*math.cos(omegas[j+1]*x_int[i]) - \
+                            a[j+1]*math.sin(omegas[j+1]*x_int[i]))
+    return (x_int, y_int, dydx_int)
+#-----------------------------------------------------------------------------#
 def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False, 
            plot_spectrum=False, plot_log_scale=False, refine_peaks=False,
            auto_open_plot=False):
@@ -15,12 +123,36 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     and returns the s and F, which are the discrete frequency samples indexed
     from -N/2 to N/2 and the corresponding values of the DFT, respectively.
     options:
-    -shift_frequencies: if you want to generate values of the energy spectrum  
-                        spanning halfway into the negative frequencies
-    -plot_spectrum: if you want to create a plot of the power spectrum
-    -plot_angular_frequencies: if, instead of using the discrete frequency 
-                        samples, s, for plotting, use the corresponding values 
-                        of omega=2*pi*s 
+    -shift_frequencies:         if you want to generate values of the energy   
+                                spectrum spanning halfway into the negative 
+                                frequencies
+    -plot_angular_frequencies:  if, instead of using the discrete frequency 
+                                samples, s, for plotting, use the corresponding 
+                                values of omega=2*pi*s
+    -plot_spectrum:             if you want to create a plot of the power 
+                                spectrum alongside the sampled points
+    -plot_log_scale:            plot the spectrum on a logaritmic scale, such
+                                that very low energies are magnified
+    -refine_peaks:              take the peaks of the spectrum (defined as 
+                                having enregy values greater one standard
+                                deviation above the average energy returned by
+                                the DFT) and, if any peaks are right next to 
+                                each other, then view them as a single peak
+                                cluster. define a new peak value that is the 
+                                center of mass of the peak cluster. after that,
+                                create "bins" for each positive peak, starting
+                                at zero and going all the way to the folding 
+                                frequency. the bin boundaries are defined as
+                                halfway between peaks. the refined peak values
+                                are then taken to be the centers of mass of 
+                                each bin
+    -auto_open_plot:            automatically open the saved figure of the 
+                                signal and spectrum (w/peak refinement process)
+    Inputs:
+        - t = time points of the discrete signal
+        - f = signal values of the discrete signal
+    Output:
+        - the spectral peaks found (refined, if desired)
     '''
     import numpy as np
     from matplotlib import pyplot as plt
@@ -111,8 +243,10 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     energy_cutoff = np.average(energies_without_DC) + 0.0*np.std(energies_without_DC)
     # pick out the peaks (freq,energy) in the energy spectrum (list of tuples)
     peaks = [(freqs[i],energies[i][0]) for i in range(N) if energies[i] > energy_cutoff]
-    # pick out the nonnegative peaks
+    # pick out the nonnegative peaks (this is just for final printing)
     nonnegative_peaks = [peak for peak in peaks if peak[0] >= 0.0]
+    # pick out the positive peaks (this will be returned to calling code)
+    positive_freqs = [peak[0] for peak in nonnegative_peaks if peak[0] != 0.0]
     # if desired, begin refinement of the peaks
     if refine_peaks:
         # find the boundaries of the "bins" corresponding to each peak
@@ -206,8 +340,8 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     print('\t\tB =', round(B,2), 'Hertz \t\t (1/2 the full bandwidth captured)')
     print('\n\t\tdelta_t = 1/(2*B): \t', round(1.0/(2.0*B),3), 'seconds')
     print('\t\tdelta_freq =', delta_freq_eq+':\t', round(delta_freq,3), freq_label)
-    print('\n\n\tsampling rate used: \t\t', round(sampling_rate_used,2), 'samples/second')
-    print('\tNyquist ("folding") frequency:\t', round(folding_freq,2), freq_label)
+    print('\n\n\tsampling rate used: \t\t ', round(sampling_rate_used,2), 'samples/second')
+    print('\tNyquist ("folding") frequency:\t ', round(folding_freq,2), freq_label)
     if refine_peaks:
         print('\n\t'+str(len(positive_peaks)) + ' spectral peaks:')
         for peak in positive_peaks:
@@ -290,7 +424,7 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
                     included_freqs = [peak[0] for peak in cluster]
                     included_energies = [peak[1] for peak in cluster]
                     # set the semi-minor axis in the x direction
-                    semi_minor_axis = 2.0*(included_freqs[-1]-included_freqs[0])
+                    semi_minor_axis = 1.5*(included_freqs[-1]-included_freqs[0])
                     # set the semi-major axis in the y direction
                     semi_major_axis = max(included_energies)-min(included_energies)
                     # set the center of the ellipse
@@ -301,9 +435,13 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
                     x_ellipse = []
                     y_ellipse = []
                     for theta in thetas:
-                        # convert to cartesian coordinates
-                        x_ellipse.append(x_center + semi_minor_axis*np.cos(theta))
-                        y_ellipse.append(y_center + semi_major_axis*np.sin(theta))
+                        # compute points and convert to cartesian coordinates
+                        x_point = x_center + semi_minor_axis*np.cos(theta)
+                        y_point = y_center + semi_major_axis*np.sin(theta)
+                        # if the y-point is positive, then record it
+                        if y_point > 0.0:
+                            x_ellipse.append(x_point)
+                            y_ellipse.append(y_point)
                     # plot the ellipse
                     if one_cluster_plotted:
                         plt.plot(x_ellipse, y_ellipse, 'b-')
@@ -333,22 +471,69 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
         # open the saved image, if desired
         if auto_open:
             webbrowser.open(file_name)
-    # return the relevant quantities
-    return freqs, energies, sampling_rate_used
+    # if not refining peaks, set that variable equal to the positive peaks
+    if not refine_peaks:
+        refined_positive_freqs = positive_freqs
+    # return the peaks
+    return refined_positive_freqs
 #-----------------------------------------------------------------------------#    
 
 # test the DFT
 omegas_actual = [5.0, 8.43]
+
+# find the sampling rate needed (Nyquist rate) to capture all frequencies used
+max_omega = max(omegas_actual)
+max_s = max_omega/(2.0*np.pi)
+nyquist_rate = 2.0*max_s
+delta_t_needed = 1.0/nyquist_rate
+
+# generate a discrete signal over a small set of points
 t_start = 0.0
 t_end = 10.0
-n_points = 31
+n_points = 19
 t = np.linspace(t_start, t_end, n_points)
-f = sum([np.sin(omega*t) for omega in omegas_actual]) + 6.0
- 
-freqs, energies, sampling_rate_used = my_dft(t, f, 
-                                         shift_frequencies=True,
-                                         use_angular_frequencies=True,
-                                         plot_spectrum=True, 
-                                         plot_log_scale=True,
-                                         refine_peaks=True,
-                                         auto_open_plot=True)
+f = sum([np.sin(omega*t) + 2.0*np.cos(omega*t) for omega in omegas_actual]) + 6.0
+#define the same signal on a very fine grid (to get the "exact" function)
+t_fine = np.linspace(t_start, t_end, 100*n_points)
+f_fine = sum([np.sin(omega*t_fine) + 2.0*np.cos(omega*t_fine) for omega in omegas_actual]) + 6.0
+
+# find the sinc interpolation of the time signal
+t_fine, f_int = whittaker_shannon_interp(t,f,t_fine)
+
+# take the DFT to find the peaks as best you can
+omegas_found = my_dft(t, f, 
+                     shift_frequencies=True,
+                     use_angular_frequencies=True,
+                     plot_spectrum=True, 
+                     plot_log_scale=True,
+                     refine_peaks=True,
+                     auto_open_plot=True)
+
+# interpolate the points using the tonal peaks found by taking the DFT
+t_fine, f_int_tones, dummy = fourierInterp_given_freqs(t, f, omegas_found, t_fine)
+
+# interpolate the points using the correct omegas
+t_fine, f_int_omegas, dummy = fourierInterp_given_freqs(t, f, omegas_actual, t_fine)
+
+
+
+# print important quantities
+print('\n\tactual frequencies:')
+for omega in omegas_actual:
+    print('\t\t\t\t\t ', round(omega,2), 'radians/second')
+print('\n\tnyquist rate \n\t(i.e. sampling rate needed):     ', \
+       round(nyquist_rate,2), 'samples/second')
+print('\n\tdelta_t needed: \t\t ', round(delta_t_needed,2), 'seconds')
+
+# plot signals and interpolations
+linewidth = 2.0
+plt.close('all')
+plt.figure('interpolation')
+plt.plot(t_fine,f_fine,'k-',linewidth=linewidth)
+plt.plot(t,f,'ko',label='$f \,\, samples$',markersize=8)
+plt.plot(t_fine,f_int,'b--',linewidth=linewidth,label='$sinc \,\, interp.$')
+plt.plot(t_fine,f_int_tones,'r--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{found}$')     
+plt.plot(t_fine,f_int_omegas,'y--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{actual}$')     
+plt.xlabel('$t, [s]$', fontsize=16)
+plt.ylabel('$f(t)$', fontsize=16)
+plt.legend(loc='best',fontsize=16)
