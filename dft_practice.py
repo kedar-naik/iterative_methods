@@ -115,27 +115,42 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False):
                             a[j+1]*math.sin(omegas[j+1]*x_int[i]))
     return (x_int, y_int, dydx_int)
 #-----------------------------------------------------------------------------#
-def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False, 
-           plot_spectrum=False, plot_log_scale=False, refine_peaks=False,
-           auto_open_plot=False):
+def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False, 
+           use_angular_frequencies=False, plot_spectrum=False, 
+           plot_log_scale=False, refine_peaks=False, auto_open_plot=False):
     '''
     takes in a discrete signal and corresponding time points as numpy arrays 
     and returns the s and F, which are the discrete frequency samples indexed
     from -N/2 to N/2 and the corresponding values of the DFT, respectively.
     options:
-    -shift_frequencies:         if you want to generate values of the energy   
+    -percent_energy_AC_peaks:   this number will determine what counts as a 
+                                peak and what doesn't. discrete frequency 
+                                values in the first half of the spectrum (NOT 
+                                including the D.C. value -- only A.C. content 
+                                is considered) with the highest power are 
+                                chosen, in descending order, to be peaks. peak 
+                                selection ends once the selected peaks contain 
+                                more than the specificed percentage of the 
+                                total energy in the discrete signal, as given 
+                                by Parseval's Theorem. note that since the 
+                                power spectrum is mirrored, in practice, you're 
+                                looking only at the positive discrete 
+                                frequencies in the shifted DFT. the "total" 
+                                energy should be computed only over these 
+                                "postive frequencies by convention"
+    -shift_frequencies:         if you want to generate values of the power   
                                 spectrum spanning halfway into the negative 
                                 frequencies
     -plot_angular_frequencies:  if, instead of using the discrete frequency 
-                                samples, s, for plotting, use the corresponding 
+                                samples, s, for plotting, use the corresponding
                                 values of omega=2*pi*s
     -plot_spectrum:             if you want to create a plot of the power 
                                 spectrum alongside the sampled points
     -plot_log_scale:            plot the spectrum on a logaritmic scale, such
-                                that very low energies are magnified
+                                that very low powers are magnified
     -refine_peaks:              take the peaks of the spectrum (defined as 
-                                having enregy values greater one standard
-                                deviation above the average energy returned by
+                                having power values greater one standard
+                                deviation above the average power returned by
                                 the DFT) and, if any peaks are right next to 
                                 each other, then view them as a single peak
                                 cluster. define a new peak value that is the 
@@ -170,8 +185,8 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
         F[m] = 0.0
         for n in range(N):
             F[m] += f[n]*np.exp(-2.0*np.pi*1j*m*n/N)
-    # convert the DFT to energies
-    energies = np.absolute(F)**2
+    # convert the DFT to powers
+    powers = np.absolute(F)**2
     # compute 2B (the bandwidth)
     B = N/(2.0*L)
     # calculate the Nyquist frequency (a.k.a. folding frequency)
@@ -181,16 +196,80 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
         folding_freq = B                # [Hz]
     # compute the discrete frequency values at which the DFT is being computed
     s = np.linspace(0.0,2.0*B,N+1)[:-1]
-    # split the discrete frequencies and pick out the positive entries
-    if refine_peaks:
-        if N%2==0:
-            s_half_positive = s[1:int(N/2)+1]
-            energies_half_positive = energies[1:int(N/2)+1]
+    
+    # pick out the positive entries of the shifted spectrum (n.b. this does NOT
+    # include the D.C. component)
+    if N%2==0:
+        s_half_positive = s[1:int(N/2)+1]
+        powers_half_positive = powers[1:int(N/2)+1]
+    else:
+        s_half_positive = s[1:int((N+1)/2)]
+        powers_half_positive = powers[1:int((N+1)/2)]
+    # compute the total energy contained in the positive half of the spectrum
+    N_half = len(powers_half_positive)
+    E_half_positive = (1/N_half)*sum(powers_half_positive)
+    # zip together the frequencies and powers, then sort them in descending 
+    # order based on the power values
+    points_half_positive = zip(s_half_positive, powers_half_positive)
+    sorted_points = sorted(points_half_positive, 
+                           key=lambda point: point[1], 
+                           reverse=True)
+    # starting from the end of the list, declare points to be peaks until the 
+    # cumulative peak energy just exceeds the desired percentage
+    positive_peaks = []
+    cummulative_E = 0.0
+    required_E = (percent_energy_AC_peaks/100.0)*E_half_positive
+    last_point = False
+    for point in sorted_points:
+        # extract the two parts of the tuple
+        point_s = point[0]
+        point_power = point[1]
+        # convert to rad/s, if desired
+        if use_angular_frequencies:
+            point_freq = 2.0*np.pi*point_s
         else:
-            s_half_positive = s[1:int((N+1)/2)]
-            energies_half_positive = energies[1:int((N+1)/2)]
-        # if refining peaks and the spectrum isn't already being shifted, then
-        # shift it so that you're only looking at the positive peaks
+            point_freq = point_s
+        # add this power value to the cummulative sum (multiply by 1/N_half
+        # here -- not 1/"# peaks recorded" -- because we're still in fact 
+        # computing half the total energy of the signal, but now just 
+        # pretending that the powers associated with all points yet to be 
+        # selected are zero)
+        cummulative_E += (1/N_half)*point_power
+        # record this point as a peak
+        positive_peaks.append((point_freq,point_power))
+        # note if we're at the at end of the list (for setting "cutoff")
+        if point == sorted_points[-1]:
+            last_point = True
+        # check to see if we've surpassed the required energy criterion
+        if cummulative_E >= required_E:
+            # compute the percent of the total energy captured by these peaks
+            percent_E_captured = 100.0*(cummulative_E/E_half_positive)
+            break
+    # sort the newly found peaks into ascending order by frequency
+    positive_peaks = sorted(positive_peaks, key=lambda point: point[0])
+    # define a "cutoff" power (for the purposes of plotting) as the average of 
+    # the power value of the last peak selected and the power value of the next 
+    # point that was to have been evaluated. if there are no more points left
+    # (every point available has been converted to a peak), then take an 
+    # average of the last peak's power and zero. i.e. the cutoff is just half
+    # the last peak's power
+    if last_point:
+        effective_power_cutoff = point_power/2.0
+    else:
+        # recover the index of the last recorded peak
+        point_index = sorted_points.index(point)
+        # extract the power of the next available point
+        next_point_power = sorted_points[point_index+1][1]
+        effective_power_cutoff = 0.5*(point_power + next_point_power)
+    # if D.C. power exceeds this cutoff, then include it as a peak for printing
+    DC_power = powers[0]
+    if DC_power >= effective_power_cutoff:
+        nonnegative_peaks = [(0.0, DC_power)] + positive_peaks
+    # pick out the positive frequency values (will be returned to calling code)
+    positive_freqs = [peak[0] for peak in positive_peaks]    
+    # if refining peaks and the spectrum isn't already being shifted, then
+    # shift it so that you're only looking at the positive peaks
+    if refine_peaks:
         shift_frequencies = True        
     # shift "negative frequencies by convention" onto real negative frequencies
     if shift_frequencies:
@@ -198,12 +277,12 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
             # even N
             s = np.hstack((np.fliplr([-s[1:int(N/2)]])[0], s[:int(N/2)+1]))
             F = np.vstack((F[int(N/2)+1:], F[:int(N/2)+1]))
-            energies = np.vstack((energies[int(N/2)+1:], energies[:int(N/2)+1]))
+            powers = np.vstack((powers[int(N/2)+1:], powers[:int(N/2)+1]))
         else:
             # odd N
             s = np.hstack((np.fliplr([-s[1:int((N+1)/2)]])[0], s[:int((N+1)/2)]))
             F = np.vstack((F[int((N+1)/2):], F[:int((N+1)/2)]))
-            energies = np.vstack((energies[int((N+1)/2):], energies[:int((N+1)/2)]))
+            powers = np.vstack((powers[int((N+1)/2):], powers[:int((N+1)/2)]))
     # set the frequency plotting vector to the desired type
     if use_angular_frequencies:
         # compute the angular frequencies corresponding to s
@@ -236,100 +315,87 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     # set an internal value for being "close to zero"
     machine_zero = np.finfo(float).eps      # machine zero
     close_to_zero = machine_zero*1e3        # might as well be machine zero
-    # check to see if any of the energies are zero (or close to machine zero)
-    energies_close_to_zero = [energy for energy in energies if np.absolute(energy) < close_to_zero]   
-    # set an energy cutoff that sets the bar for what counts as a peak
-    energies_without_DC = [energies[i] for i in range(N) if freqs[i] != 0.0]
-    energy_cutoff = np.average(energies_without_DC) + 0.0*np.std(energies_without_DC)
-    # pick out the peaks (freq,energy) in the energy spectrum (list of tuples)
-    peaks = [(freqs[i],energies[i][0]) for i in range(N) if energies[i] > energy_cutoff]
-    # pick out the nonnegative peaks (this is just for final printing)
-    nonnegative_peaks = [peak for peak in peaks if peak[0] >= 0.0]
-    # pick out the positive peaks (this will be returned to calling code)
-    positive_freqs = [peak[0] for peak in nonnegative_peaks if peak[0] != 0.0]
+    # check to see if any of the powers are zero (or close to machine zero)
+    powers_close_to_zero = [power for power in powers if np.absolute(power) < close_to_zero]        
     # if desired, begin refinement of the peaks
     if refine_peaks:
-        # find the boundaries of the "bins" corresponding to each peak
-        if len(peaks) != 0:
-            # count up the number of peaks found
-            n_peaks = len(peaks)
-            # if the DC value is a peak, the count will be odd
-            if n_peaks%2 == 1:
-                # remove the DC value from the count so that n_peaks is even
-                n_peaks -= 1
-            # if there are still peaks left, cluster them, bound them, bin them, refine them
-            if n_peaks >= 2:
-                # pull out the positive peaks
-                positive_peaks = peaks[-int(n_peaks/2):]
-                # cluster the peaks that are only separated by delta_freq
-                clusters = []
-                current_cluster = []
-                for i in range(len(positive_peaks)-1):
-                    current_freq = positive_peaks[i][0]
-                    next_freq = positive_peaks[i+1][0]
-                    distance_to_next_freq = next_freq-current_freq
-                    if abs(distance_to_next_freq-delta_freq) < close_to_zero:
-                        # turn the flag on for having found adjacent peaks
-                        adjacent_peaks = True                        
-                        # append the first of the two peak tuples being compared
-                        current_cluster.append(positive_peaks[i])
-                    else:
-                        # turn the flag on for having found adjacent peaks
-                        adjacent_peaks = False
-                        # append the final peak tuple of the current cluster
-                        current_cluster.append(positive_peaks[i])
-                        # record this cluster into the list of clusters
-                        clusters.append(current_cluster)
-                        # clear the list holding the current cluster
-                        current_cluster = []
-                # deal with the case when the final peak is part of a cluster
-                if adjacent_peaks:
-                    current_cluster.append(positive_peaks[-1])
-                    clusters.append(current_cluster)
+        if positive_peaks:
+            # cluster the peaks that are only separated by delta_freq
+            clusters = []
+            current_cluster = []
+            adjacent_peaks = False
+            for i in range(len(positive_peaks)-1):
+                current_freq = positive_peaks[i][0]
+                next_freq = positive_peaks[i+1][0]
+                distance_to_next_freq = next_freq-current_freq
+                if abs(distance_to_next_freq-delta_freq) < close_to_zero:
+                    # turn the flag on for having found adjacent peaks
+                    adjacent_peaks = True                        
+                    # append the first of the two peak tuples being compared
+                    current_cluster.append(positive_peaks[i])
                 else:
-                    clusters.append([positive_peaks[-1]])
-                # compute frequencies that are each cluster's center of mass
-                clustered_freqs = []
-                for cluster in clusters:
-                    cluster_energies = [peak[1] for peak in cluster]
-                    total_cluster_energy = sum(cluster_energies)
-                    weighted_sum = sum([peak[0]*peak[1] for peak in cluster])
-                    cluster_center_of_mass = (1.0/total_cluster_energy)*weighted_sum
-                    clustered_freqs.append(cluster_center_of_mass)
-                # set the boundaries, the first bin starts at 0.0
-                boundaries = [0.0]
-                # if there's more than one clustered peak frequency... 
-                if len(clustered_freqs) > 1:
-                    # bound a given peak's bin halfway to the next peak
-                    for i in range(len(clustered_freqs)-1):
-                        boundaries.append(0.5*(clustered_freqs[i]+clustered_freqs[i+1]))
-                # the last bin ends at the folding frequency
-                boundaries.append(folding_freq)
-                # put into "peak bins" the frequencies within its boundaries
-                refined_positive_freqs = []
-                for i in range(len(clustered_freqs)):
-                    lower_boundary = boundaries[i]
-                    upper_boundary = boundaries[i+1]
-                    included_freqs = []
-                    included_energies = []
-                    for j in range(len(freqs_half_positive)):
-                        current_freq = freqs_half_positive[j]
-                        current_energy = energies_half_positive[j]
-                        if current_freq > lower_boundary and current_freq <= upper_boundary:
-                            included_freqs.append(current_freq)
-                            included_energies.append(current_energy)
-                    # for nomralization of the weights (energies)
-                    total_included_energy = sum(included_energies)
-                    # compute the center of mass of the included energies
-                    weighted_sum = 0.0
-                    for j in range(len(included_freqs)):
-                        freq = included_freqs[j]
-                        energy = included_energies[j]
-                        weighted_sum += energy*freq
-                    # compute weighted average (a.k.a. the refined peak)
-                    refined_freq = (1.0/total_included_energy)*weighted_sum
-                    # record the center of mass (which is the refined peak)
-                    refined_positive_freqs.append(refined_freq[0])
+                    # turn the flag off for having found adjacent peaks
+                    adjacent_peaks = False
+                    # append the final peak tuple of the current cluster
+                    current_cluster.append(positive_peaks[i])
+                    # record this cluster into the list of clusters
+                    clusters.append(current_cluster)
+                    # clear the list holding the current cluster
+                    current_cluster = []
+            # deal with the case when the final peak is part of a cluster
+            if adjacent_peaks:
+                current_cluster.append(positive_peaks[-1])
+                clusters.append(current_cluster)
+            else:
+                clusters.append([positive_peaks[-1]])
+            # compute frequencies that are each cluster's center of mass
+            clustered_freqs = []
+            for cluster in clusters:
+                cluster_powers = [peak[1] for peak in cluster]
+                total_cluster_power = sum(cluster_powers)
+                weighted_sum = sum([peak[0]*peak[1] for peak in cluster])
+                cluster_center_of_mass = (1.0/total_cluster_power)*weighted_sum
+                clustered_freqs.append(cluster_center_of_mass)
+            # set the boundaries, the first bin starts at 0.0
+            boundaries = [0.0]
+            # if there's more than one clustered peak frequency... 
+            if len(clustered_freqs) > 1:
+                # bound a given peak's bin halfway to the next peak
+                for i in range(len(clustered_freqs)-1):
+                    boundaries.append(0.5*(clustered_freqs[i]+clustered_freqs[i+1]))
+            # the last bin ends at the folding frequency
+            boundaries.append(folding_freq)
+            # put into "peak bins" the frequencies within its boundaries
+            refined_positive_freqs = []
+            for i in range(len(clustered_freqs)):
+                lower_boundary = boundaries[i]
+                upper_boundary = boundaries[i+1]
+                included_freqs = []
+                included_powers = []
+                for j in range(len(freqs_half_positive)):
+                    current_freq = freqs_half_positive[j]
+                    current_power = powers_half_positive[j]
+                    if current_freq > lower_boundary and current_freq <= upper_boundary:
+                        included_freqs.append(current_freq)
+                        included_powers.append(current_power)
+                # for nomralization of the weights (powers)
+                total_included_power = sum(included_powers)
+                # compute the center of mass of the included powers
+                weighted_sum = 0.0
+                for j in range(len(included_freqs)):
+                    freq = included_freqs[j]
+                    power = included_powers[j]
+                    weighted_sum += power*freq
+                # compute weighted average (a.k.a. the refined peak)
+                refined_freq = (1.0/total_included_power)*weighted_sum
+                # record the center of mass (which is the refined peak)
+                refined_positive_freqs.append(refined_freq[0])
+        else:
+            print('\n\tERROR:  D.C. component dominates spectrum. \n\t\t' + \
+                  'Increase percentage of total energy desired in peaks. ' + \
+                  '\n\t\tCurrent value: '+str(percent_energy_AC_peaks)+'%.\n')
+            return()
+                
     # print the salient quantities to the console
     print('\n'+'-'*75)
     print('\n\tfundamental relations:')
@@ -341,18 +407,16 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     print('\n\t\tdelta_t = 1/(2*B): \t', round(1.0/(2.0*B),3), 'seconds')
     print('\t\tdelta_freq =', delta_freq_eq+':\t', round(delta_freq,3), freq_label)
     print('\n\n\tsampling rate used: \t\t ', round(sampling_rate_used,2), 'samples/second')
-    print('\tNyquist ("folding") frequency:\t ', round(folding_freq,2), freq_label)
+    print('\t\t\t\t\t  ('+str(round(2.0*np.pi*sampling_rate_used,2))+' radians/second)')
+    print('\n\tNyquist ("folding") frequency:\t ', round(folding_freq,2), freq_label)
+    print('\n\t'+str(len(positive_peaks)) + ' spectral peaks')
+    print('\t(capturing '+str(round(percent_E_captured[0],2))+'% of A.C. energy):')
+    for peak in positive_peaks:
+        print('\t\t\t\t\t ', round(peak[0],2), freq_label)
     if refine_peaks:
-        print('\n\t'+str(len(positive_peaks)) + ' spectral peaks:')
-        for peak in positive_peaks:
-            print('\t\t\t\t\t ', round(peak[0],2), freq_label)
         print('\t'+str(len(refined_positive_freqs)) + ' refined spectral peaks:')
         for refined_freq in refined_positive_freqs:
             print('\t\t\t\t\t ', round(refined_freq,2), freq_label)
-    else:
-        print('\n\t'+str(len(nonnegative_peaks)) + ' spectral peaks:')
-        for peak in nonnegative_peaks:
-            print('\t\t\t\t\t ', round(peak[0],2), freq_label)
     print('\n'+'-'*75)
     # plot the spectrum    
     if plot_spectrum:
@@ -369,28 +433,28 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
         # plot the DFT
         plt.subplot(1,2,2)
         # set the y position from which the vertical lines start
-        if energies_close_to_zero:
+        if powers_close_to_zero:
             vlines_bottom = 0.0
             plot_log_scale=False
             # print a message to the screen if can't plot on log scale
-            if len(energies_close_to_zero) == 1:
+            if len(powers_close_to_zero) == 1:
                 value_string = 'VALUE EXISTS'
             else:
                 value_string = 'VALUES EXIST'
-            print('\n\tN.B. CAN\'T PLOT ON LOG SCALE BECAUSE '+str(len(energies_close_to_zero))+' \n\t' + \
+            print('\n\tN.B. CAN\'T PLOT ON LOG SCALE BECAUSE '+str(len(powers_close_to_zero))+' \n\t' + \
                   '     ZERO '+value_string+' IN THE POWER SPECTRUM!\n\t' + \
                   '     PLOTTING SPECTURM ON LINEAR AXIS INSTEAD...')
         else:
-            vlines_bottom = 10**np.floor(np.log10(min(energies)))
-        # plot the energies on the desired y-axis
+            vlines_bottom = 10**np.floor(np.log10(min(powers)))
+        # plot the powers on the desired y-axis
         if plot_log_scale:
-            plt.semilogy(freqs,energies,'ko',label='$power \, spectrum$')
+            plt.semilogy(freqs,powers,'ko',label='$power \, spectrum$')
         else:
-            plt.plot(freqs,energies,'ko',label='$power \, spectrum$')
+            plt.plot(freqs,powers,'ko',label='$power \, spectrum$')
         # plot the vertical lines
-        plt.vlines(freqs,[vlines_bottom]*n_points,energies,'k')
-        # plot the energy cutoff
-        plt.plot([0.0,folding_freq],[energy_cutoff]*2,'y--', label='$peak \,\, cutoff$')
+        plt.vlines(freqs,[vlines_bottom]*n_points,powers,'k')
+        # plot the power cutoff
+        plt.plot([0.0,folding_freq],[effective_power_cutoff]*2,'y--', label='$peak \,\, cutoff$')
         # plot the Nyquist frequency and add the appropriate axis labels
         if use_angular_frequencies:
             folding_label = '$\omega_{nyquist}$'
@@ -406,40 +470,41 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
             for boundary in boundaries:
                 if boundary==boundaries[-1]:
                     # plot a solid yellow line at the folding frequency
-                    plt.plot([boundary]*2,[vlines_bottom,max(energies)],'c-')
+                    plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c-')
                 else:
                     if boundary==boundaries[0]:
                         # plot the first boundary and add to the legend
-                        plt.plot([boundary]*2,[vlines_bottom,max(energies)],'c--',label='$bin \,\, boundaries$')
+                        plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c--',label='$bin \,\, boundaries$')
                     else:
                         # plot the remaining boundaries
-                        plt.plot([boundary]*2,[vlines_bottom,max(energies)],'c--')
+                        plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c--')
             # draw ellipses around clusters
             one_cluster_plotted = False
             for cluster in clusters:
                 n_included_peaks = len(cluster)
                 # exclude clusters that are just lonesome peaks
                 if n_included_peaks > 1:
-                    # extract the included frequencies and energies
+                    # extract the included frequencies and powers
                     included_freqs = [peak[0] for peak in cluster]
-                    included_energies = [peak[1] for peak in cluster]
+                    included_powers = [peak[1] for peak in cluster]
                     # set the semi-minor axis in the x direction
                     semi_minor_axis = 1.5*(included_freqs[-1]-included_freqs[0])
                     # set the semi-major axis in the y direction
-                    semi_major_axis = max(included_energies)-min(included_energies)
+                    semi_major_axis = max(included_powers)-min(included_powers)
                     # set the center of the ellipse
                     x_center = sum(included_freqs)/n_included_peaks
-                    y_center = sum(included_energies)/n_included_peaks
+                    y_center = sum(included_powers)/n_included_peaks
                     # draw out the ellipse using polar coordinates
-                    thetas = np.linspace(0.0, 2.0*np.pi, 36)
+                    thetas = np.linspace(0.0, 2.0*np.pi, 360)
                     x_ellipse = []
                     y_ellipse = []
                     for theta in thetas:
                         # compute points and convert to cartesian coordinates
                         x_point = x_center + semi_minor_axis*np.cos(theta)
                         y_point = y_center + semi_major_axis*np.sin(theta)
-                        # if the y-point is positive, then record it
-                        if y_point > 0.0:
+                        # if the y-point is greater that where the vertical 
+                        # lines start, then record it, otherwise, ignore
+                        if y_point > vlines_bottom:
                             x_ellipse.append(x_point)
                             y_ellipse.append(y_point)
                     # plot the ellipse
@@ -449,12 +514,12 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
                         plt.plot(x_ellipse, y_ellipse, 'b-', label='$peak \,\, clusters$')
                         one_cluster_plotted = True
         # plot the Nyquist frequecy (a.k.a folding frequency)
-        plt.plot([folding_freq]*2,[vlines_bottom,max(energies)],'r--',label=folding_label)
+        plt.plot([folding_freq]*2,[vlines_bottom,max(powers)],'r--',label=folding_label)
         # write the plot title with the peaks    
         title = '$peaks: \quad'
         for peak in nonnegative_peaks:
             title += str(np.round(peak[0],2)) 
-            if peak[0] != peaks[-1][0]:
+            if peak[0] != nonnegative_peaks[-1][0]:
                 title += ', \,'
         title += '$'
         # plot the title and the legend
@@ -477,7 +542,9 @@ def my_dft(t, f, shift_frequencies=False, use_angular_frequencies=False,
     # return the peaks
     return refined_positive_freqs
 #-----------------------------------------------------------------------------#    
-
+#def non_aliased_peaks:
+    
+    
 # test the DFT
 omegas_actual = [5.0, 8.43]
 
@@ -485,6 +552,7 @@ omegas_actual = [5.0, 8.43]
 max_omega = max(omegas_actual)
 max_s = max_omega/(2.0*np.pi)
 nyquist_rate = 2.0*max_s
+nyquist_rate_rad = 2.0*np.pi*nyquist_rate
 delta_t_needed = 1.0/nyquist_rate
 
 # generate a discrete signal over a small set of points
@@ -493,7 +561,7 @@ t_end = 10.0
 n_points = 19
 t = np.linspace(t_start, t_end, n_points)
 f = sum([np.sin(omega*t) + 2.0*np.cos(omega*t) for omega in omegas_actual]) + 6.0
-#define the same signal on a very fine grid (to get the "exact" function)
+# define the same signal on a very fine grid (to get the "exact" function)
 t_fine = np.linspace(t_start, t_end, 100*n_points)
 f_fine = sum([np.sin(omega*t_fine) + 2.0*np.cos(omega*t_fine) for omega in omegas_actual]) + 6.0
 
@@ -502,6 +570,7 @@ t_fine, f_int = whittaker_shannon_interp(t,f,t_fine)
 
 # take the DFT to find the peaks as best you can
 omegas_found = my_dft(t, f, 
+                     percent_energy_AC_peaks=90,
                      shift_frequencies=True,
                      use_angular_frequencies=True,
                      plot_spectrum=True, 
@@ -523,12 +592,13 @@ for omega in omegas_actual:
     print('\t\t\t\t\t ', round(omega,2), 'radians/second')
 print('\n\tnyquist rate \n\t(i.e. sampling rate needed):     ', \
        round(nyquist_rate,2), 'samples/second')
+print('\t\t\t\t\t  ('+str(round(nyquist_rate_rad,2))+' radians/second)')
 print('\n\tdelta_t needed: \t\t ', round(delta_t_needed,2), 'seconds')
 
 # plot signals and interpolations
 linewidth = 2.0
 plt.close('all')
-plt.figure('interpolation')
+plt.figure('interpolation', dpi=110)
 plt.plot(t_fine,f_fine,'k-',linewidth=linewidth)
 plt.plot(t,f,'ko',label='$f \,\, samples$',markersize=8)
 plt.plot(t_fine,f_int,'b--',linewidth=linewidth,label='$sinc \,\, interp.$')
