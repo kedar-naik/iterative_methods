@@ -66,6 +66,51 @@ def my_non_periodic_fun(t, omegas):
     df = df.reshape(df.size,1)
     return f, df
 #-----------------------------------------------------------------------------#
+class governing_ode:
+    '''
+    class for defining and evaluating the ode 
+    '''
+    # class constructor (accepts the actual omegas from the user)
+    def __init__(self, actual_omegas):
+        self.actual_omegas = actual_omegas
+    
+    # function to evaluate the expression that follows du/dt = ...
+    def evaluate(self, t, u):
+        '''
+        given a set of specfied frequencies and time points, this subroutine 
+        samples a function (meant the represent the RHS of an ODE) composed of 
+        a sum of sinusoids oscillating at the frequencies specified. returns a 
+        numpy array of the samples of the RHS of the ODE.
+        '''
+        import numpy as np
+        # initialize single-entry flag
+        single_entry = False
+        # if inputs are floats/ints, convert to lists
+        if type(t)==int or type(t)==float:
+            t = [t]
+            single_entry = True
+        if type(u)==int or type(u)==float:
+            u = [u]
+            single_entry = True
+        # instantiate empty list
+        dudt = []
+        # The equation for periodic population harvesting
+        C = 10                    # carrying capacity
+        for i in range(len(t)):
+            # expression giving the derivative    
+            dudt_i = u[i]*(1-(u[i]/C))
+            # run through all the frequencies
+            for omega in self.actual_omegas:
+                dudt_i -= np.sin(omega*t[i])
+            # append to result list
+            dudt.append(dudt_i)
+        if single_entry:
+            dudt = float(dudt[0])
+        else:
+            # convert to a numpy array
+            dudt = np.array(dudt).reshape(len(dudt),1)
+        return dudt
+#-----------------------------------------------------------------------------#
 def my_non_periodic_ode(t, u, omegas):
     '''
     given a set of specfied frequencies and time points, this subroutine 
@@ -509,15 +554,21 @@ def HB_omgea_check(omegas_given):
 # angular frequencies in the underlying signal
 actual_omegas = [1.5, 2.5]
 actual_omegas = [1.0, 2.1, 3.6]
-#actual_omegas = [9.8, 24.5]
-#actual_omegas = [9.8, 39.2]
+
 # angular frequencies input by the user to the HB method
-omegas = [1.0, 3.0]
-omegas = copy.copy(actual_omegas)
+omegas = copy.copy(actual_omegas)       # use the exact values
+omegas = [1.0, 2.1, 3.7]
 
 # select the time discretization to use for specifying the of time instances
 time_discretization = 'use_Nyquist'
 time_discretization = 'use_T1'
+
+##############################################################
+# define the governing equation based on these actual omegas #
+##############################################################
+
+# instantiate an object of the governing equation
+the_ode = governing_ode(actual_omegas)
 
 ##############################################################################
 # inadmissibiltiy check: are these omegas compatible with T1 discretization? #
@@ -596,100 +647,102 @@ if auto_open:
 ############################################################################
 # See how the error in the derivatives changes if the freqs used are wrong #
 ############################################################################
-
-# set the error range to study
-abs_percent_error = 75
-# pick which measure of error to use ('f-difference' or 'distance')
-error_measure = 'distance'
-
-# print message to the screen
-print('\nstudying the effect of supplying incorrect frequencies...')
-# initialize the set of percent errors to try 
-percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
-# instantiate list for plotting
-max_norm_sol_error = 0
-norm_sol_errors = []
-# find the interpolated HB derivative with the correct angular frequencies
-D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas, time_discretization)
-f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-df_HB = np.dot(D_HB, f_HB_actual)
-t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
-# loop through the various errors to try
-for error_percentage in percent_errors:
-    # set the wrong angular frequencies
-    trial_omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
-    # find the interpolated HB derivative with the incorrect frequencies
-    D_HB, t_HB = harmonic_balance_operator(trial_omegas, time_discretization)
-    f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-    df_HB = np.dot(D_HB, f_HB)
-    t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
-    # compute error of incorrect solution, using values at interpolation points
-    if error_measure == 'f-difference':
-        # just just the error in df
-        sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
-    if error_measure == 'distance':
-        # compute distance on (t,df) plane    
-        sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
-    # find the l2-norm of the error
-    norm_sol_error = myNorm(sol_error)
-    norm_sol_errors.append(norm_sol_error)
-    # store the current omegas if they yield a higher error
-    if max_norm_sol_error < norm_sol_error:
-        max_norm_sol_error = norm_sol_error
-        max_error_omegas = trial_omegas
-        
-# plot the norm of the solution errors
-plot_name = 'supplying_incorrect_freqs'
-auto_open = False
-plt.figure(plot_name)
-plt.plot(percent_errors, norm_sol_errors, 'k.-')
-plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
-if error_measure == 'f-difference':
-    plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
-if error_measure == 'distance':
-    plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
-plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
-plt.tight_layout()
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
+run_this_section = False            # do you want to run this analysis?
+# if desired, perform this study
+if run_this_section:
+    # set the error range to study
+    abs_percent_error = 75
+    # pick which measure of error to use ('f-difference' or 'distance')
+    error_measure = 'distance'
     
-# find the interpolated HB derivative with the most incorrect frequencies
-max_omegas = max_error_omegas
-D_HB, t_HB = harmonic_balance_operator(max_omegas, time_discretization)
-f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-df_HB_wrong = np.dot(D_HB, f_HB)
-t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
-
-# plot the correct derivative and the worst answer studied
-plot_name = 'result_at_worst_answer'
-auto_open = False
-plt.figure(plot_name)
-plt.plot(t, f, label='$f_{exact}$')
-plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
-plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
-plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
-t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
-plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
-plt.xlabel('$t$', fontsize=16)
-plt.ylabel('$f(t)$', fontsize=16)
-plt.legend(loc='best')
-plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
+    # print message to the screen
+    print('\nstudying the effect of supplying incorrect frequencies...')
+    # initialize the set of percent errors to try 
+    percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
+    # instantiate list for plotting
+    max_norm_sol_error = 0
+    norm_sol_errors = []
+    # find the interpolated HB derivative with the correct angular frequencies
+    D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas, time_discretization)
+    f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+    df_HB = np.dot(D_HB, f_HB_actual)
+    t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
+    # loop through the various errors to try
+    for error_percentage in percent_errors:
+        # set the wrong angular frequencies
+        trial_omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
+        # find the interpolated HB derivative with the incorrect frequencies
+        D_HB, t_HB = harmonic_balance_operator(trial_omegas, time_discretization)
+        f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+        df_HB = np.dot(D_HB, f_HB)
+        t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
+        # compute error of incorrect solution, using values at interpolation points
+        if error_measure == 'f-difference':
+            # just just the error in df
+            sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
+        if error_measure == 'distance':
+            # compute distance on (t,df) plane    
+            sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
+        # find the l2-norm of the error
+        norm_sol_error = myNorm(sol_error)
+        norm_sol_errors.append(norm_sol_error)
+        # store the current omegas if they yield a higher error
+        if max_norm_sol_error < norm_sol_error:
+            max_norm_sol_error = norm_sol_error
+            max_error_omegas = trial_omegas
+            
+    # plot the norm of the solution errors
+    plot_name = 'supplying_incorrect_freqs'
+    auto_open = False
+    plt.figure(plot_name)
+    plt.plot(percent_errors, norm_sol_errors, 'k.-')
+    plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
+    if error_measure == 'f-difference':
+        plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
+    if error_measure == 'distance':
+        plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
+    plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
+    plt.tight_layout()
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    # find the interpolated HB derivative with the most incorrect frequencies
+    max_omegas = max_error_omegas
+    D_HB, t_HB = harmonic_balance_operator(max_omegas, time_discretization)
+    f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+    df_HB_wrong = np.dot(D_HB, f_HB)
+    t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
+    
+    # plot the correct derivative and the worst answer studied
+    plot_name = 'result_at_worst_answer'
+    auto_open = False
+    plt.figure(plot_name)
+    plt.plot(t, f, label='$f_{exact}$')
+    plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
+    plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
+    plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
+    t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
+    plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
+    plt.xlabel('$t$', fontsize=16)
+    plt.ylabel('$f(t)$', fontsize=16)
+    plt.legend(loc='best')
+    plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
     
 #############################################################################
 # See how cond(D_HB) and cond(E_inv) vary with selected angular frequencies #
@@ -847,7 +900,7 @@ for n in range(time_points):
         f.append(initial_value)
     else:
         # explicitly step forward in time (give it the actual frequencies!)
-        f.append(f[n-1] + delta_t*my_non_periodic_ode(times[n-1],f[n-1],actual_omegas))
+        f.append(f[n-1] + delta_t*the_ode.evaluate(times[n-1],f[n-1]))
 
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
@@ -905,24 +958,24 @@ if animate_plot and auto_play:
 # open the saved image, if desired
 if auto_open:
     webbrowser.open(file_name)
-
+'''
 ##########################################################################
 # Find the solution over the lowest-frequency period using the HB method #
 ##########################################################################
 
 # constant value of the initial guess for the HB solution
-init_guess = 2.0
+init_guess = 10.0
 
 # pseudo-time step size
 delta_tau = 0.0783
 #delta_tau = 0.16   # for init guess 10.0
 #delta_tau = 0.27    # for init guess 15.0
-delta_tau = 0.151
-delta_tau = 0.001
+delta_tau = 0.1
+#delta_tau = 0.0001
 
 # choose a nonlinear iterative scheme
-pseudo_transient_continuation = False
-picard_iteration = True
+pseudo_transient_continuation = True
+picard_iteration = False
 scaled_pseudo_transient_continuation = False
 
 # if scaled pseudo-transient continuation is being used, just make sure that 
@@ -966,13 +1019,14 @@ print('computing the harmonic-balance solution...\n')
 D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
 # create a constant-valued initial guess for the HB solution
 f_HB = np.array([init_guess]*len(t_HB)).reshape((len(t_HB),1))
-f_HB = init_guess*np.random.rand(len(t_HB)).reshape((len(t_HB),1))
+#f_HB = init_guess*np.random.rand(len(t_HB)).reshape((len(t_HB),1))
+
 # create a list for the solution evolution history
 f_HB_history = [np.copy(f_HB)]
 # create a list for the residual evolution history
 residual_history = []
 # create a list for the cost evolution history
-C_history = []
+C_history = [] 
 
 
 # start the pseudo-transient continuation method
@@ -1019,6 +1073,7 @@ for k in range(max_pseudo_steps):
             tau += delta_tau
         B = step_size*I
         
+        """
         #  or, create your own B (n.b. for linear systems, optimal B = inv(A))
         # attempt to invert the opertor by inverting the eigendecomposition
         # (except replace the zero eigenvalue with omega_1)
@@ -1033,11 +1088,10 @@ for k in range(max_pseudo_steps):
         E = np.linalg.inv(E_inv)
         # compute the approximate inverse operator (B = E*C*E_inv)
         # is always real...why?
-        '''
         B = np.real(reduce(lambda x,y: np.dot(x,y), [E,almost_C_inv,E_inv]))
         print('det(B) = ',np.linalg.det(B))
         B = step_size*B
-        '''
+        """
         
     if picard_iteration:
         print()
@@ -1059,13 +1113,15 @@ for k in range(max_pseudo_steps):
     else:
         # update solution and append to solution history
         f_HB += error
+        
+        """
         #################################
         # !!! HARDCODING FOR TESTING !!!!
         ################################
         f_HB = np.dot(my_inv(D_HB),func_evaluations) # x_k+1 = inv(A)b(x_k)...should be the same as B=inv(A)
         f_HB = np.dot(my_pinv(D_HB),func_evaluations) # x_k+1 = pinv(A)b(x_k)...stalls...not sure why
         f_HB = (1.0-delta_tau)*(np.dot(my_pinv(D_HB),func_evaluations) + np.average(f_HB))+delta_tau*residual# x_k+1 = pinv(A)b(x_k)+<b(x_k)>
-        
+        """
         f_HB_history.append(np.copy(f_HB))
         # if the residual is low enough, update the frequencies
         if adjust_omegas:
@@ -1135,16 +1191,6 @@ for k in range(max_pseudo_steps):
         # record the old set of omegas
         omegas_history.append(omegas)
 
-                
-                
-                
-                
-            
-        
-                    
-                
-            
-        
 
 # plotting: USER INPUTS! do you want to animate the solution history or just
 # plot the final result? (True = animate, False = just print final result)
@@ -1259,6 +1305,189 @@ if animate_plot and auto_play:
 # open the saved image, if desired
 if auto_open:
     webbrowser.open(file_name)
+'''
+
+# create a function that runs an HB problem ----------------------------------#
+def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau, 
+                     constant_init_guess, residual_convergence_criteria, 
+                     make_plot=False, auto_open_plot=False, make_movie=False, 
+                     auto_play_movie=False):
+    '''
+    this subroutine returns a convergered harmonic-balance solution comprising
+    the K angular frequencies given.
+    Inputs:
+        - omegas: list of K angular frequencies to build up the HB solution
+        - time_discretization: 'use_T1' (equally spaced points just spanning 
+                                the period corresponding to the lowest omega)
+                                                  OR
+                               'use_Nyquist' (use the time interval needed to 
+                                just capture bandwidth, i.e. highest omega)
+        - the_ode: instance of governing_ode class that define the ODE
+        - constant_init_guess: constant-value guess for the HB initial solution
+        - delta_tau: pseudo-time step size
+        - residual_convergence_criteria: residual convergence criteria
+        - make_plot: plot the converged solution and the residual history
+        - auto_open: automatically open the plot
+        - make_movie: animate the convergence process
+        - auto_play: automatically open and start playing the movie
+    Output:
+        - t_HB: the time instances over which the HB solution is defined
+        - f_HB: the converged harmonic-balance solution
+    '''    
+    # maximum number of pseudo-time steps to try (can be changed, if needed)
+    max_pseudo_steps = 100000
+    # print message to the screen
+    print('computing the harmonic-balance solution...')
+    # create the harmonic balance operator matrix and find the time instances
+    D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
+    # create a constant-valued initial guess for the HB solution
+    f_HB = np.array([constant_init_guess]*len(t_HB)).reshape((len(t_HB),1))
+    #f_HB = init_guess+np.random.rand(len(t_HB)).reshape((len(t_HB),1))
+    # create a list for the solution evolution history
+    f_HB_history = [np.copy(f_HB)]
+    # create a list for the residual evolution history
+    residual_history = []    
+    # start the pseudo-transient continuation method
+    for k in range(max_pseudo_steps):
+        # compute the residual vector corresponding the current solution
+        func_evaluations = the_ode.evaluate(t_HB,f_HB)
+        matrix_vector_product = np.dot(D_HB,f_HB)
+        residual = func_evaluations - matrix_vector_product
+        # compute the norm of the residual vector and print to the screen
+        norm_residual = np.linalg.norm(residual)
+        residual_history.append(norm_residual)    
+        print('\n\titer: '+str(k)+'\t||residual||: '+str(norm_residual), end='')
+        # compute the "error," which is a function of the residual, for pseudo-
+        # trasient continuation (pseudo-time stepping)
+        I = np.eye(2*len(omegas)+1)     # identity matrix
+        step_size = delta_tau
+        B = step_size*I
+        error = np.dot(B,residual)
+        # if convergence criteria is met, end, else, update solution
+        if norm_residual < residual_convergence_criteria:
+            # converged solution found
+            print('\n\n\t\tharmonic balance solution found.\n')
+            break
+        elif np.isnan(norm_residual) or np.isinf(norm_residual):
+            # unstable solution
+            print('\n\n\t\tunstable solution. try again.\n')
+            break
+        else:
+            # update the solution
+            f_HB += error
+            # append the updated solution to the solution history
+            f_HB_history.append(np.copy(f_HB))
+        # if we've reached the maximum allowable number of pseudo-time steps
+        if k == max_pseudo_steps-1:
+            print('\n\t\tmaximum number of pseudo-time steps reached.\n')
+    # if animation desired but no plot, make plot anyway and print warning
+    if make_movie and not make_plot:
+        print('\n\tcan\'t make movie without making plot...making plot.')
+        make_plot = True
+    # if desired, plot the results
+    if make_plot:
+        # plotting: USER INPUTS! want to animate the solution history or just
+        # plot the final result? (True=animate, False=just print final result)
+        animate_plot = make_movie
+        plot_name = 'harmonic-balance ODE'
+        n_images = k+1                  # total number of images computed
+        skip_images = 3                 # images to skip between frames
+        auto_play = auto_play_movie     # automatically play the movie
+        auto_open = auto_open_plot      # automatically open the final image
+        # plotting: instantiate the figure
+        fig = plt.figure(plot_name)
+        # plotting: rescale the figure window to fit both subplots
+        xdim, ydim = plt.gcf().get_size_inches()
+        # for two plots, this scaling can't be more than 1.7!!!
+        plt.gcf().set_size_inches(1.7*xdim, ydim, forward=True)
+        # set the title for the HB solution plot
+        title = ''
+        counter=1
+        for omega in omegas:
+            title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
+            counter += 1
+        # things that won't change for the residual history plot
+        plt.subplot(1,2,2)
+        plt.xlabel('$iteration$', fontsize=16)
+        plt.ylabel('$\\left\Vert \\frac{\partial f}{\partial t} \minus D_{HB}f_{HB} \\right\Vert_2$', fontsize=16)
+        plt.title(r'$\Delta\tau = '+str(delta_tau)+'$')
+        plt.xlim(0, k)
+        min_power = int(math.log(min(residual_history),10))-1
+        max_power = int(math.log(max(residual_history),10))+1
+        plt.ylim(pow(10,min_power), pow(10,max_power))
+        # plotting: set the total number of frames
+        if animate_plot == True:
+            # capture all frames (skipping, if necessary) and the final frame
+            all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
+        else:
+            # no animation: just capture the last one
+            all_frames = [n_images-1]
+        # plotting: capturing the movie
+        writer = animation.writers['ffmpeg'](fps=10)
+        with writer.saving(fig, plot_name+'.mp4', 300):
+            frame = 0
+            for n in all_frames:
+                # plot the HB solution
+                plt.subplot(1,2,1)
+                plt.cla()
+                plt.plot(t_HB,f_HB_history[n],'mo')
+                t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB_history[n], omegas)
+                plt.plot(t_HB_int, f_HB_int, 'm--')
+                plt.xlabel('$t$', fontsize=16)
+                plt.ylabel('$f_{HB}$', fontsize=16)
+                plt.ylim(np.min(f_HB_history), np.max(f_HB_history))
+                plt.title(title)
+                # plot the residual
+                plt.subplot(1,2,2)
+                if n > 0 and residual_history[n] >= residual_history[0]:
+                    plt.semilogy(residual_history[:n+1],'g-')
+                else:
+                    plt.semilogy(residual_history[:n+1],'r-')
+                # set the spacing options
+                plt.tight_layout()
+                #plt.subplots_adjust(left=0.07)
+                #plt.subplots_adjust(right=0.95)
+                # progress monitor
+                percent_done = float(n)*100.0/(n_images-1)
+                print('\tcapturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                       round(percent_done,2),'%')
+                writer.grab_frame()
+                frame += 1
+            writer.grab_frame()
+        # rescale the y-axis of the HB solution plot before saving an image
+        plt.subplot(1,2,1)
+        white_space = (max(f_HB_int)-min(f_HB_int))/5.0
+        plt.ylim(min(f_HB_int)-white_space,max(f_HB_int)+white_space)
+        # plotting: save an image of the final frame
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=500)
+        print('figure saved: '+plot_name+'\n')
+        # free memory used for the plot
+        plt.close(fig)
+        # start playing the movie, if desired
+        if animate_plot and auto_play:
+            webbrowser.open(plot_name+'.mp4')
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+    # return the converged solution
+    return t_HB, f_HB
+#-----------------------------------------------------------------------------#
+########################################################
+# solve the equation using the harmonic-balance method #
+########################################################
+t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
+                        delta_tau=0.1, 
+                        constant_init_guess=10.0, 
+                        residual_convergence_criteria=1e-3, 
+                        make_plot=True, auto_open_plot=False, 
+                        make_movie=True, auto_play_movie=False)
+                        
+# interpolate the harmonic-balance solution using the prescribed frequencies
+t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
+
+# recursive aliasing check. keep doubling the bandwidth (largest )
 
 ##########################################################
 # compare the harmonic-balance and time-accurate results #
@@ -1412,7 +1641,7 @@ print('\n\trank(E_inv) = ',np.linalg.matrix_rank(E_inv))
 print('\n-comparing the average value of the time-accurate solution (over \n'
        +' one steady-state "long" period corresponding to the actual \n'
        +' frequencies) to the average value of the harmonic-balance solution \n'
-       +' (over the '+str(2*len(omegas)+1)+' time instances):')
+       +' (over the '+str(N)+' time instances):')
 print('\n\tf_ave (time-accurate) = '+str(round(f_ave_TA,3)))
 print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3)))
 print()

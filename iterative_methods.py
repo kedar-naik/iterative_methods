@@ -441,8 +441,8 @@ def my_GE_solve(A,b):
 #-----------------------------------------------------------------------------#
 def my_inv(A):
     '''
-    this subroutine returns the inverse of the square, nonsingular matrix A
-    using gaussian elimination and an identity matrix
+    this subroutine returns the inverse of a square, nonsingular matrix A using
+    gaussian elimination and an identity matrix
     '''
     import numpy as np
     # find the dimensions of the matrix

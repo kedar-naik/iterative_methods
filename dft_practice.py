@@ -148,19 +148,22 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                                 spectrum alongside the sampled points
     -plot_log_scale:            plot the spectrum on a logaritmic scale, such
                                 that very low powers are magnified
-    -refine_peaks:              take the peaks of the spectrum (defined as 
-                                having power values greater one standard
-                                deviation above the average power returned by
-                                the DFT) and, if any peaks are right next to 
-                                each other, then view them as a single peak
-                                cluster. define a new peak value that is the 
-                                center of mass of the peak cluster. after that,
-                                create "bins" for each positive peak, starting
-                                at zero and going all the way to the folding 
-                                frequency. the bin boundaries are defined as
-                                halfway between peaks. the refined peak values
-                                are then taken to be the centers of mass of 
-                                each bin
+    -refine_peaks:              take the peaks of the spectrum (defined as the 
+                                highest-power A.C. components that capture the
+                                desired signal energy) and, if any peaks are 
+                                right next to each other, then view them as a 
+                                single peak "cluster." define a new peak value 
+                                that is the center of mass of the peak cluster. 
+                                after that, create "bins" for each positive 
+                                peak, starting at zero and going all the way to
+                                the folding frequency. the bin boundaries are 
+                                defined as halfway between peaks. these 
+                                boundaries are then adjusted such that the 
+                                boundary that is farther away from the 
+                                clustered peak is brought closer to match the 
+                                distance of the closer one. the refined peak 
+                                values are then taken to be the centers of mass 
+                                of each bin
     -auto_open_plot:            automatically open the saved figure of the 
                                 signal and spectrum (w/peak refinement process)
     Inputs:
@@ -209,7 +212,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
     N_half = len(powers_half_positive)
     E_half_positive = (1/N_half)*sum(powers_half_positive)
     # zip together the frequencies and powers, then sort them in descending 
-    # order based on the power values
+    # order based on the power values (n.b. zipped object dies after sorting)
     points_half_positive = zip(s_half_positive, powers_half_positive)
     sorted_points = sorted(points_half_positive, 
                            key=lambda point: point[1], 
@@ -296,7 +299,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         # set the units label
         freq_label = 'radians/second'
         if refine_peaks:
-            # compute the angular frequencies corresponding to the first half of s 
+            # find the angular frequencies corresponding to the first half of s 
             omega_half_positive = 2.0*np.pi*s_half_positive
             # set the postive frequencies, for peak refinement
             freqs_half_positive = omega_half_positive
@@ -348,54 +351,110 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                 clusters.append(current_cluster)
             else:
                 clusters.append([positive_peaks[-1]])
-            # compute frequencies that are each cluster's center of mass
-            clustered_freqs = []
+            # count up the number clusters found
+            n_clusters = len(clusters)
+            # compute each cluster's center of mass
+            cluster_COMs_x = []             # x-coordinate of COM
+            cluster_COMs_y = []             # y-coordinate of COM
             for cluster in clusters:
+                # extract the power values in this cluster
                 cluster_powers = [peak[1] for peak in cluster]
+                # compute the total "mass"
                 total_cluster_power = sum(cluster_powers)
-                weighted_sum = sum([peak[0]*peak[1] for peak in cluster])
-                cluster_center_of_mass = (1.0/total_cluster_power)*weighted_sum
-                clustered_freqs.append(cluster_center_of_mass)
+                # compute the frequency coordinate of this cluster's COM
+                weighted_sum_x = sum([peak[0]*peak[1] for peak in cluster])                
+                cluster_COM_x = (1.0/total_cluster_power)*weighted_sum_x
+                cluster_COMs_x.append(cluster_COM_x)
+                # this part is only for plotting the y-coordinate of the COM
+                weighted_sum_y = sum([peak[1]*peak[1] for peak in cluster])
+                cluster_COM_y = (1.0/total_cluster_power)*weighted_sum_y
+                cluster_COMs_y.append(cluster_COM_y)
             # set the boundaries, the first bin starts at 0.0
             boundaries = [0.0]
             # if there's more than one clustered peak frequency... 
-            if len(clustered_freqs) > 1:
+            if n_clusters > 1:
                 # bound a given peak's bin halfway to the next peak
-                for i in range(len(clustered_freqs)-1):
-                    boundaries.append(0.5*(clustered_freqs[i]+clustered_freqs[i+1]))
+                for i in range(n_clusters-1):
+                    boundaries.append(0.5*(cluster_COMs_x[i]+cluster_COMs_x[i+1]))
             # the last bin ends at the folding frequency
             boundaries.append(folding_freq)
             # put into "peak bins" the frequencies within its boundaries
-            refined_positive_freqs = []
-            for i in range(len(clustered_freqs)):
-                lower_boundary = boundaries[i]
-                upper_boundary = boundaries[i+1]
-                included_freqs = []
-                included_powers = []
-                for j in range(len(freqs_half_positive)):
-                    current_freq = freqs_half_positive[j]
-                    current_power = powers_half_positive[j]
-                    if current_freq > lower_boundary and current_freq <= upper_boundary:
-                        included_freqs.append(current_freq)
-                        included_powers.append(current_power)
-                # for nomralization of the weights (powers)
-                total_included_power = sum(included_powers)
-                # compute the center of mass of the included powers
-                weighted_sum = 0.0
-                for j in range(len(included_freqs)):
-                    freq = included_freqs[j]
-                    power = included_powers[j]
-                    weighted_sum += power*freq
-                # compute weighted average (a.k.a. the refined peak)
-                refined_freq = (1.0/total_included_power)*weighted_sum
-                # record the center of mass (which is the refined peak)
-                refined_positive_freqs.append(refined_freq[0])
+            refined_positive_freqs = []             # x-coordinate of COM
+            refined_COMs_y = []                     # y-coordinate of COM
+            clustered_freq_boundaries = []
+            for i in range(n_clusters):
+                # extract the current clustered peak frequency
+                clustered_freq = cluster_COMs_x[i]
+                # when the number of sample points used is even, the folding 
+                # frequency always coincides with the (N/2+1)-th discrete 
+                # frequency in the spectrum. if it so happens that the folding 
+                # frequency is also a lone peak (i.e. a cluster of one), then 
+                # the refinement procedure will not work, since the shortest 
+                # distance to a bin boundary is zero. (recall that the folding 
+                # frequency is always the upper boundary of the last bin.) so,
+                # the "adjusted" lower and upper boundaries are just the 
+                # folding frequency itself and the width of the bin is zero. in
+                # this case, there are no points over which the peak can be 
+                # refined (no points over which we can compute a center of 
+                # mass). so, the refined peak is just the peak itself, i.e. the
+                # folding frequency
+                if clustered_freq == folding_freq:
+                    refined_positive_freqs.append(folding_freq)
+                    folding_power = powers_half_positive[-1]
+                    refined_COMs_y.append(folding_power)
+                # if not dealing with special case, then start refinement
+                else:
+                    # extract the upper and lower boundary of this peak's bin
+                    lower_boundary_bin = boundaries[i]
+                    upper_boundary_bin = boundaries[i+1]
+                    # adjust the boundaries so that each clustered peak 
+                    # frequency is equidistant from its boundaries. set this 
+                    # distance equal to the smaller of the clustered peak's 
+                    # distances from its current boundaries
+                    dist_to_lower = clustered_freq - lower_boundary_bin
+                    dist_to_upper = upper_boundary_bin - clustered_freq
+                    smaller_dist = min(dist_to_lower, dist_to_upper)
+                    lower_boundary = clustered_freq - smaller_dist
+                    upper_boundary = clustered_freq + smaller_dist
+                    # record these adjusted boundaries (for plotting)
+                    clustered_freq_boundaries.append(lower_boundary)
+                    clustered_freq_boundaries.append(upper_boundary)
+                    # determine which discrete frequencies fall within this bin
+                    included_freqs = []
+                    included_powers = []
+                    for j in range(len(freqs_half_positive)):
+                        current_freq = freqs_half_positive[j]
+                        current_power = powers_half_positive[j]
+                        if current_freq > lower_boundary and current_freq <= upper_boundary:
+                            included_freqs.append(current_freq)
+                            included_powers.append(current_power)
+                    # for nomralization of the weights (powers)
+                    total_included_power = sum(included_powers)
+                    # compute the weighted sum of the included powers
+                    weighted_sum = 0.0
+                    for j in range(len(included_freqs)):
+                        freq = included_freqs[j]
+                        power = included_powers[j]
+                        weighted_sum += power*freq
+                    # compute center of mass (weighted average) (refined peak)
+                    refined_freq = (1.0/total_included_power)*weighted_sum
+                    # record the center of mass (which is the refined peak)
+                    refined_positive_freqs.append(refined_freq[0])
+                    # compute the y-coordinate of the center of mass (plotting)
+                    weighted_sum = 0.0
+                    for j in range(len(included_freqs)):
+                        power = included_powers[j]
+                        weighted_sum += power*power
+                    # find the y-coordinate of this center of mass
+                    refined_COM_y = (1.0/total_included_power)*weighted_sum
+                    # record the coordinate of center of mass (for plotting)
+                    refined_COMs_y.append(refined_COM_y)
         else:
-            print('\n\tERROR:  D.C. component dominates spectrum. \n\t\t' + \
+            print('\n\tERROR:  No peaks found...something is wrong. \n\t\t' + \
                   'Increase percentage of total energy desired in peaks. ' + \
                   '\n\t\tCurrent value: '+str(percent_energy_AC_peaks)+'%.\n')
             return()
-                
+    
     # print the salient quantities to the console
     print('\n'+'-'*75)
     print('\n\tfundamental relations:')
@@ -467,17 +526,33 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         # if refining, plot the relevant quantities 
         if refine_peaks:
             # plot the bin boundaries
+            bin_boundary_color = 'g'
             for boundary in boundaries:
                 if boundary==boundaries[-1]:
                     # plot a solid yellow line at the folding frequency
-                    plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c-')
+                    plt.plot([boundary]*2,[vlines_bottom,max(powers)], bin_boundary_color)
+                elif boundary in clustered_freq_boundaries:
+                    # at the points where clustered-peak boundaries overlap the 
+                    # orginal bin boundaries, plot a solid vertical line
+                    plt.plot([boundary]*2,[vlines_bottom,max(powers)], bin_boundary_color)
                 else:
                     if boundary==boundaries[0]:
                         # plot the first boundary and add to the legend
-                        plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c--',label='$bin \,\, boundaries$')
+                        plt.plot([boundary]*2,[vlines_bottom,max(powers)], bin_boundary_color+'--',label='$bin \,\, boundaries$')
                     else:
                         # plot the remaining boundaries
-                        plt.plot([boundary]*2,[vlines_bottom,max(powers)],'c--')
+                        plt.plot([boundary]*2,[vlines_bottom,max(powers)], bin_boundary_color+'--')
+            # plot the adjusted, clustered peak boundaries
+            for boundary in clustered_freq_boundaries:
+                if boundary==clustered_freq_boundaries[0]:
+                    # plot the first peak boundary and add to the legend
+                    plt.plot([boundary]*2,[vlines_bottom,max(powers)],'m--',label='$cluster \,\, boundaries$')
+                else:
+                    # plot the remaining boundaries
+                    plt.plot([boundary]*2,[vlines_bottom,max(powers)],'m--')
+            # plot the centers of mass corresponding to each peak cluster
+            plt.plot(cluster_COMs_x, cluster_COMs_y,'b*')
+            plt.plot(refined_positive_freqs, refined_COMs_y,'m*')
             # draw ellipses around clusters
             one_cluster_plotted = False
             for cluster in clusters:
@@ -488,7 +563,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     included_freqs = [peak[0] for peak in cluster]
                     included_powers = [peak[1] for peak in cluster]
                     # set the semi-minor axis in the x direction
-                    semi_minor_axis = 1.5*(included_freqs[-1]-included_freqs[0])
+                    semi_minor_axis = 1.0*(included_freqs[-1]-included_freqs[0])
                     # set the semi-major axis in the y direction
                     semi_major_axis = max(included_powers)-min(included_powers)
                     # set the center of the ellipse
@@ -504,9 +579,11 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                         y_point = y_center + semi_major_axis*np.sin(theta)
                         # if the y-point is greater that where the vertical 
                         # lines start, then record it, otherwise, ignore
-                        if y_point > vlines_bottom:
-                            x_ellipse.append(x_point)
+                        x_ellipse.append(x_point)
+                        if y_point >= effective_power_cutoff:
                             y_ellipse.append(y_point)
+                        else:
+                            y_ellipse.append(effective_power_cutoff)
                     # plot the ellipse
                     if one_cluster_plotted:
                         plt.plot(x_ellipse, y_ellipse, 'b-')
@@ -544,9 +621,9 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
 #-----------------------------------------------------------------------------#    
 #def non_aliased_peaks:
     
-    
+
 # test the DFT
-omegas_actual = [5.0, 8.43]
+omegas_actual = [5.2, 7.93]
 
 # find the sampling rate needed (Nyquist rate) to capture all frequencies used
 max_omega = max(omegas_actual)
@@ -558,7 +635,7 @@ delta_t_needed = 1.0/nyquist_rate
 # generate a discrete signal over a small set of points
 t_start = 0.0
 t_end = 10.0
-n_points = 19
+n_points = 26
 t = np.linspace(t_start, t_end, n_points)
 f = sum([np.sin(omega*t) + 2.0*np.cos(omega*t) for omega in omegas_actual]) + 6.0
 # define the same signal on a very fine grid (to get the "exact" function)
@@ -570,7 +647,7 @@ t_fine, f_int = whittaker_shannon_interp(t,f,t_fine)
 
 # take the DFT to find the peaks as best you can
 omegas_found = my_dft(t, f, 
-                     percent_energy_AC_peaks=90,
+                     percent_energy_AC_peaks=97,
                      shift_frequencies=True,
                      use_angular_frequencies=True,
                      plot_spectrum=True, 
