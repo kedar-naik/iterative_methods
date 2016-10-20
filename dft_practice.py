@@ -117,7 +117,8 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False):
 #-----------------------------------------------------------------------------#
 def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False, 
            use_angular_frequencies=False, plot_spectrum=False, 
-           plot_log_scale=False, refine_peaks=False, auto_open_plot=False):
+           plot_log_scale=False, refine_peaks=False, auto_open_plot=False,
+           verbose=True):
     '''
     takes in a discrete signal and corresponding time points as numpy arrays 
     and returns the s and F, which are the discrete frequency samples indexed
@@ -166,11 +167,16 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                                 of each bin
     -auto_open_plot:            automatically open the saved figure of the 
                                 signal and spectrum (w/peak refinement process)
+    -verbose:                   print information about the spectrum and the 
+                                refinement process to the screen
     Inputs:
         - t = time points of the discrete signal
         - f = signal values of the discrete signal
     Output:
+        - the discrete frequencies on which the DFT is defined
+        - the values of the DFT at those frequencies
         - the spectral peaks found (refined, if desired)
+        - the adjusted boundaries of the peak clusters
     '''
     import numpy as np
     from matplotlib import pyplot as plt
@@ -266,8 +272,9 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         effective_power_cutoff = 0.5*(point_power + next_point_power)
     # if D.C. power exceeds this cutoff, then include it as a peak for printing
     DC_power = powers[0]
+    DC_is_a_peak = False
     if DC_power >= effective_power_cutoff:
-        nonnegative_peaks = [(0.0, DC_power)] + positive_peaks
+        DC_is_a_peak = True
     # pick out the positive frequency values (will be returned to calling code)
     positive_freqs = [peak[0] for peak in positive_peaks]    
     # if refining peaks and the spectrum isn't already being shifted, then
@@ -320,6 +327,8 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
     close_to_zero = machine_zero*1e3        # might as well be machine zero
     # check to see if any of the powers are zero (or close to machine zero)
     powers_close_to_zero = [power for power in powers if np.absolute(power) < close_to_zero]        
+    # initialize the vector that will be returned, in case refinement is off
+    peak_bounds_tuples = []    
     # if desired, begin refinement of the peaks
     if refine_peaks:
         if positive_peaks:
@@ -382,6 +391,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
             refined_positive_freqs = []             # x-coordinate of COM
             refined_COMs_y = []                     # y-coordinate of COM
             clustered_freq_boundaries = []
+            peak_bounds_tuples = []                 # list will be returned
             for i in range(n_clusters):
                 # extract the current clustered peak frequency
                 clustered_freq = cluster_COMs_x[i]
@@ -402,6 +412,12 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     refined_positive_freqs.append(folding_freq)
                     folding_power = powers_half_positive[-1]
                     refined_COMs_y.append(folding_power)
+                    # the tuple of (lower_boundary, upper_boundary) for this
+                    # case will just be (folding_freq, folding_freq). N.B. if
+                    # this case occurs, it will always be the last one in the
+                    # list, since the clustered peaks are already sorted in 
+                    # ascending order
+                    peak_bounds_tuples.append((folding_freq,folding_freq))
                 # if not dealing with special case, then start refinement
                 else:
                     # extract the upper and lower boundary of this peak's bin
@@ -416,9 +432,14 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     smaller_dist = min(dist_to_lower, dist_to_upper)
                     lower_boundary = clustered_freq - smaller_dist
                     upper_boundary = clustered_freq + smaller_dist
+                    # convert the values to floats from 1-element numpy arrays
+                    lower_boundary = lower_boundary[0]
+                    upper_boundary = upper_boundary[0]
                     # record these adjusted boundaries (for plotting)
                     clustered_freq_boundaries.append(lower_boundary)
                     clustered_freq_boundaries.append(upper_boundary)
+                    # append these boundies to the list that will be returned
+                    peak_bounds_tuples.append((lower_boundary,upper_boundary))
                     # determine which discrete frequencies fall within this bin
                     included_freqs = []
                     included_powers = []
@@ -454,29 +475,32 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                   'Increase percentage of total energy desired in peaks. ' + \
                   '\n\t\tCurrent value: '+str(percent_energy_AC_peaks)+'%.\n')
             return()
-    
-    # print the salient quantities to the console
-    print('\n'+'-'*75)
-    print('\n\tfundamental relations:')
-    print('\n\t\tN = 2*B*L')
-    print('\t\tL = N*delta_t')
-    print('\n\t\tN =', round(N,2), 'samples \t\t (no. of time samples given)')
-    print('\t\tL =', round(L,2), 'seconds \t (one interval beyond last point)')
-    print('\t\tB =', round(B,2), 'Hertz \t\t (1/2 the full bandwidth captured)')
-    print('\n\t\tdelta_t = 1/(2*B): \t', round(1.0/(2.0*B),3), 'seconds')
-    print('\t\tdelta_freq =', delta_freq_eq+':\t', round(delta_freq,3), freq_label)
-    print('\n\n\tsampling rate used: \t\t ', round(sampling_rate_used,2), 'samples/second')
-    print('\t\t\t\t\t  ('+str(round(2.0*np.pi*sampling_rate_used,2))+' radians/second)')
-    print('\n\tNyquist ("folding") frequency:\t ', round(folding_freq,2), freq_label)
-    print('\n\t'+str(len(positive_peaks)) + ' spectral peaks')
-    print('\t(capturing '+str(round(percent_E_captured[0],2))+'% of A.C. energy):')
-    for peak in positive_peaks:
-        print('\t\t\t\t\t ', round(peak[0],2), freq_label)
-    if refine_peaks:
-        print('\t'+str(len(refined_positive_freqs)) + ' refined spectral peaks:')
-        for refined_freq in refined_positive_freqs:
-            print('\t\t\t\t\t ', round(refined_freq,2), freq_label)
-    print('\n'+'-'*75)
+    # if not refining peaks, set that variable equal to the positive peaks
+    if not refine_peaks:
+        refined_positive_freqs = positive_freqs
+    # print the salient quantities to the console, if desired
+    if verbose:
+        print('\n'+'-'*75)
+        print('\n\tfundamental relations:')
+        print('\n\t\tN = 2*B*L')
+        print('\t\tL = N*delta_t')
+        print('\n\t\tN =', round(N,2), 'samples \t\t (no. of time samples given)')
+        print('\t\tL =', round(L,2), 'seconds \t (one interval beyond last point)')
+        print('\t\tB =', round(B,2), 'Hertz \t\t (1/2 the full bandwidth captured)')
+        print('\n\t\tdelta_t = 1/(2*B): \t', round(1.0/(2.0*B),3), 'seconds')
+        print('\t\tdelta_freq =', delta_freq_eq+':\t', round(delta_freq,3), freq_label)
+        print('\n\n\tsampling rate used: \t\t ', round(sampling_rate_used,2), 'samples/second')
+        print('\t\t\t\t\t  ('+str(round(2.0*np.pi*sampling_rate_used,2))+' radians/second)')
+        print('\n\tNyquist ("folding") frequency:\t ', round(folding_freq,2), freq_label)
+        print('\n\t'+str(len(positive_peaks)) + ' spectral peaks')
+        print('\t(capturing '+str(round(percent_E_captured[0],2))+'% of A.C. energy):')
+        for peak in positive_peaks:
+            print('\t\t\t\t\t ', round(peak[0],2), freq_label)
+        if refine_peaks:
+            print('\t'+str(len(refined_positive_freqs)) + ' refined spectral peaks:')
+            for refined_freq in refined_positive_freqs:
+                print('\t\t\t\t\t ', round(refined_freq,2), freq_label)
+        print('\n'+'-'*75)
     # plot the spectrum    
     if plot_spectrum:
         # plotting preliminaries
@@ -511,7 +535,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         else:
             plt.plot(freqs,powers,'ko',label='$power \, spectrum$')
         # plot the vertical lines
-        plt.vlines(freqs,[vlines_bottom]*n_points,powers,'k')
+        plt.vlines(freqs,[vlines_bottom]*N,powers,'k')
         # plot the power cutoff
         plt.plot([0.0,folding_freq],[effective_power_cutoff]*2,'y--', label='$peak \,\, cutoff$')
         # plot the Nyquist frequency and add the appropriate axis labels
@@ -555,6 +579,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
             plt.plot(refined_positive_freqs, refined_COMs_y,'m*')
             # draw ellipses around clusters
             one_cluster_plotted = False
+            cluster_counter = 0
             for cluster in clusters:
                 n_included_peaks = len(cluster)
                 # exclude clusters that are just lonesome peaks
@@ -563,23 +588,33 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     included_freqs = [peak[0] for peak in cluster]
                     included_powers = [peak[1] for peak in cluster]
                     # set the semi-minor axis in the x direction
-                    semi_minor_axis = 1.0*(included_freqs[-1]-included_freqs[0])
+                    semi_minor_axis = 1.5*(included_freqs[-1]-included_freqs[0])
                     # set the semi-major axis in the y direction
                     semi_major_axis = max(included_powers)-min(included_powers)
                     # set the center of the ellipse
                     x_center = sum(included_freqs)/n_included_peaks
                     y_center = sum(included_powers)/n_included_peaks
                     # draw out the ellipse using polar coordinates
-                    thetas = np.linspace(0.0, 2.0*np.pi, 360)
+                    thetas = np.linspace(0.0, 2.0*np.pi, 3*36)
                     x_ellipse = []
                     y_ellipse = []
                     for theta in thetas:
                         # compute points and convert to cartesian coordinates
                         x_point = x_center + semi_minor_axis*np.cos(theta)
                         y_point = y_center + semi_major_axis*np.sin(theta)
+                        # if the x-point falls outside the adjusted cluster
+                        # boundaries, then reassign that point to the value of
+                        # this nearest boundary
+                        lower_boundary = peak_bounds_tuples[cluster_counter][0]
+                        upper_boundary = peak_bounds_tuples[cluster_counter][1]
+                        if x_point < lower_boundary:
+                            x_ellipse.append(lower_boundary)
+                        elif x_point > upper_boundary:
+                            x_ellipse.append(upper_boundary)
+                        else:
+                            x_ellipse.append(x_point)
                         # if the y-point is greater that where the vertical 
                         # lines start, then record it, otherwise, ignore
-                        x_ellipse.append(x_point)
                         if y_point >= effective_power_cutoff:
                             y_ellipse.append(y_point)
                         else:
@@ -590,13 +625,17 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     else:
                         plt.plot(x_ellipse, y_ellipse, 'b-', label='$peak \,\, clusters$')
                         one_cluster_plotted = True
+                # increment counter
+                cluster_counter += 1
         # plot the Nyquist frequecy (a.k.a folding frequency)
         plt.plot([folding_freq]*2,[vlines_bottom,max(powers)],'r--',label=folding_label)
         # write the plot title with the peaks    
         title = '$peaks: \quad'
-        for peak in nonnegative_peaks:
-            title += str(np.round(peak[0],2)) 
-            if peak[0] != nonnegative_peaks[-1][0]:
+        if DC_is_a_peak:
+            title += str('0.00, \,')
+        for freq in refined_positive_freqs:
+            title += str(np.round(freq,2)) 
+            if freq != refined_positive_freqs[-1]:
                 title += ', \,'
         title += '$'
         # plot the title and the legend
@@ -613,74 +652,77 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         # open the saved image, if desired
         if auto_open:
             webbrowser.open(file_name)
-    # if not refining peaks, set that variable equal to the positive peaks
-    if not refine_peaks:
-        refined_positive_freqs = positive_freqs
     # return the peaks
-    return refined_positive_freqs
+    return freqs, powers, refined_positive_freqs, peak_bounds_tuples
 #-----------------------------------------------------------------------------#    
-#def non_aliased_peaks:
+def main():
+    '''
+    main function, executed when run as a standalone file
+    '''
+
+    # test the DFT
+    omegas_actual = [5.2, 7.93]
     
+    # find the sampling rate needed (Nyquist rate) to capture all frequencies used
+    max_omega = max(omegas_actual)
+    max_s = max_omega/(2.0*np.pi)
+    nyquist_rate = 2.0*max_s
+    nyquist_rate_rad = 2.0*np.pi*nyquist_rate
+    delta_t_needed = 1.0/nyquist_rate
+    
+    # generate a discrete signal over a small set of points
+    t_start = 0.0
+    t_end = 10.0
+    n_points = 26
+    t = np.linspace(t_start, t_end, n_points)
+    f = sum([np.sin(omega*t) + 2.0*np.cos(omega*t) for omega in omegas_actual]) + 6.0
+    # define the same signal on a very fine grid (to get the "exact" function)
+    t_fine = np.linspace(t_start, t_end, 100*n_points)
+    f_fine = sum([np.sin(omega*t_fine) + 2.0*np.cos(omega*t_fine) for omega in omegas_actual]) + 6.0
+    
+    # find the sinc interpolation of the time signal
+    t_fine, f_int = whittaker_shannon_interp(t,f,t_fine)
+    
+    # take the DFT to find the peaks as best you can
+    s, F, peaks_found, peak_boundaries = my_dft(t, f, 
+                                                 percent_energy_AC_peaks=97,
+                                                 shift_frequencies=True,
+                                                 use_angular_frequencies=True,
+                                                 plot_spectrum=True, 
+                                                 plot_log_scale=True,
+                                                 refine_peaks=True,
+                                                 auto_open_plot=True,
+                                                 verbose=True)
+    
+    # interpolate the points using the tonal peaks found by taking the DFT
+    t_fine, f_int_tones, dummy = fourierInterp_given_freqs(t, f, peaks_found, t_fine)
+    
+    # interpolate the points using the correct omegas
+    t_fine, f_int_omegas, dummy = fourierInterp_given_freqs(t, f, omegas_actual, t_fine)
+    
+    # print important quantities
+    print('\n\tactual frequencies:')
+    for omega in omegas_actual:
+        print('\t\t\t\t\t ', round(omega,2), 'radians/second')
+    print('\n\tnyquist rate \n\t(i.e. sampling rate needed):     ', \
+           round(nyquist_rate,2), 'samples/second')
+    print('\t\t\t\t\t  ('+str(round(nyquist_rate_rad,2))+' radians/second)')
+    print('\n\tdelta_t needed: \t\t ', round(delta_t_needed,2), 'seconds')
+    
+    # plot signals and interpolations
+    linewidth = 2.0
+    plt.close('all')
+    plt.figure('interpolation', dpi=110)
+    plt.plot(t_fine,f_fine,'k-',linewidth=linewidth)
+    plt.plot(t,f,'ko',label='$f \,\, samples$',markersize=8)
+    plt.plot(t_fine,f_int,'b--',linewidth=linewidth,label='$sinc \,\, interp.$')
+    plt.plot(t_fine,f_int_tones,'r--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{found}$')     
+    plt.plot(t_fine,f_int_omegas,'y--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{actual}$')     
+    plt.xlabel('$t, [s]$', fontsize=16)
+    plt.ylabel('$f(t)$', fontsize=16)
+    plt.legend(loc='best',fontsize=16)
+#-----------------------------------------------------------------------------#
 
-# test the DFT
-omegas_actual = [5.2, 7.93]
-
-# find the sampling rate needed (Nyquist rate) to capture all frequencies used
-max_omega = max(omegas_actual)
-max_s = max_omega/(2.0*np.pi)
-nyquist_rate = 2.0*max_s
-nyquist_rate_rad = 2.0*np.pi*nyquist_rate
-delta_t_needed = 1.0/nyquist_rate
-
-# generate a discrete signal over a small set of points
-t_start = 0.0
-t_end = 10.0
-n_points = 26
-t = np.linspace(t_start, t_end, n_points)
-f = sum([np.sin(omega*t) + 2.0*np.cos(omega*t) for omega in omegas_actual]) + 6.0
-# define the same signal on a very fine grid (to get the "exact" function)
-t_fine = np.linspace(t_start, t_end, 100*n_points)
-f_fine = sum([np.sin(omega*t_fine) + 2.0*np.cos(omega*t_fine) for omega in omegas_actual]) + 6.0
-
-# find the sinc interpolation of the time signal
-t_fine, f_int = whittaker_shannon_interp(t,f,t_fine)
-
-# take the DFT to find the peaks as best you can
-omegas_found = my_dft(t, f, 
-                     percent_energy_AC_peaks=97,
-                     shift_frequencies=True,
-                     use_angular_frequencies=True,
-                     plot_spectrum=True, 
-                     plot_log_scale=True,
-                     refine_peaks=True,
-                     auto_open_plot=True)
-
-# interpolate the points using the tonal peaks found by taking the DFT
-t_fine, f_int_tones, dummy = fourierInterp_given_freqs(t, f, omegas_found, t_fine)
-
-# interpolate the points using the correct omegas
-t_fine, f_int_omegas, dummy = fourierInterp_given_freqs(t, f, omegas_actual, t_fine)
-
-
-
-# print important quantities
-print('\n\tactual frequencies:')
-for omega in omegas_actual:
-    print('\t\t\t\t\t ', round(omega,2), 'radians/second')
-print('\n\tnyquist rate \n\t(i.e. sampling rate needed):     ', \
-       round(nyquist_rate,2), 'samples/second')
-print('\t\t\t\t\t  ('+str(round(nyquist_rate_rad,2))+' radians/second)')
-print('\n\tdelta_t needed: \t\t ', round(delta_t_needed,2), 'seconds')
-
-# plot signals and interpolations
-linewidth = 2.0
-plt.close('all')
-plt.figure('interpolation', dpi=110)
-plt.plot(t_fine,f_fine,'k-',linewidth=linewidth)
-plt.plot(t,f,'ko',label='$f \,\, samples$',markersize=8)
-plt.plot(t_fine,f_int,'b--',linewidth=linewidth,label='$sinc \,\, interp.$')
-plt.plot(t_fine,f_int_tones,'r--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{found}$')     
-plt.plot(t_fine,f_int_omegas,'y--',linewidth=linewidth,label='$trig. \,\, interp \,\, w/\mathbf{\omega}_{actual}$')     
-plt.xlabel('$t, [s]$', fontsize=16)
-plt.ylabel('$f(t)$', fontsize=16)
-plt.legend(loc='best',fontsize=16)
+# standard boilerplate to call the main() function
+if __name__ == '__main__':
+    main()
