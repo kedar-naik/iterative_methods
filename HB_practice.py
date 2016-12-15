@@ -1053,28 +1053,50 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     # set some preliminaries if changing omegas w/ gradient descent
     if optimize_omegas:
         # learning rate for gradient descent
-        eta = 1e-4
+        eta = 1e-5
         # level of partial convergence to begin optimizing the omegas
         partial_convergence_level = 1e-1
+        # set where to start ('first instance', 'last instance', 'both ends')
+        start_time_marching_at = 'first instance'
+        #start_time_marching_at = 'last instance'
+        #start_time_marching_at = 'both ends'        
+        # specify which cost function to use (1 = curve, 2=derivative, 3=both)
+        use_cost_number = 1
+        # exponentially scale the cost function 
+        exponentially_scale_cost = True
+        # cauchy criterion for the cost
+        cauchy_criterion = 1e-4
         # compute the time interval between HB time in
         t_HB_interval = t_HB[1]
         # set the time step for the time-accurate steps
         delta_t = t_HB_interval/50.0
         # no. of comparison points between interpolant and time-accurate points
-        n_comp_points = int(1.5*((2.0*np.pi/omegas[0])/delta_t - 1))
+        n_comp_points = int(1.0*((2.0*np.pi/omegas[0])/delta_t - 1))
         # count up the number of omegas being used
         K = len(omegas)
         # define the number of time instances
         N = 2*K+1
         # intitalize the history lists
-        t_HB_history = []
-        t_HB_int_history = []
-        f_HB_int_history = []
-        t_stepped_history = []
-        f_stepped_history = []
-        dfdt_stepped_history = []
-        f_HB_int_stepped_history = []
-        dfdt_HB_int_stepped_history = []
+        t_HB_history = []               # time instances
+        t_HB_int_history = []           # fine time grids for interpolation
+        f_HB_int_history = []           # interpolations of the HB solutions
+        if start_time_marching_at == 'both ends':
+            t_stepped_1_history = []
+            f_stepped_1_history = []
+            t_stepped_2_history = []
+            f_stepped_2_history = []
+            dfdt_stepped_1_history = []
+            f_HB_int_stepped_1_history = []
+            dfdt_HB_int_stepped_1_history = []
+            dfdt_stepped_2_history = []
+            f_HB_int_stepped_2_history = []
+            dfdt_HB_int_stepped_2_history = []
+        else:
+            t_stepped_history = []
+            f_stepped_history = []
+            dfdt_stepped_history = []
+            f_HB_int_stepped_history = []
+            dfdt_HB_int_stepped_history = []
         cost_history = []
         omegas_history = []
         f_HB_history_opt = []
@@ -1082,18 +1104,20 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         t_HB_int = []
         f_HB_int = []
         # "velocity" coefficient for momentum gradient descent, in range (0,1]
-        gamma = 0.1
-        # initialize "velocity" for momentum gradient descent
-        v = 0.0
-        # specify which cost function to use
-        use_cost_number = 1
+        # gamma = 0 : regular gradient descent with learning rate0 eta
+        # gamma = 1 : current gradient is added to cummulative sum of all the 
+        #             gradients found from previous iterations
+        # 0 < gamma < 1 : current gradient is added to all the previous
+        #                 gradients, but with decreasing weights the farther 
+        #                 they get from the current iteration
+        gamma = 0.0
+        # initialize "velocity" values for momentum gradient descent for each
+        # of the K omegas
+        v = [0.0]*K
         # initialize previous_cost to a very big number
         previous_cost = 1e6
-        # cauchy criterion for the cost
-        cauchy_criterion = 1e-5
-        # set where to start ('first instance', 'last instance')
-        start_time_maraching_at = 'first instance'
-        start_time_maraching_at = 'last instance'
+        
+        
         
         
         
@@ -1104,7 +1128,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     # start the pseudo-transient continuation method
     for iteration in range(max_pseudo_steps):
         # if we've started optimizing then recompute the HB basis
-        if currently_optimizing:
+        if currently_optimizing:            
             # recompute the operator matrix and the time instances
             D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
             # interpolate the previous solution onto these new time instances
@@ -1160,64 +1184,131 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 # assume the solution found at each time instance is the 
                 # initial condition for a new time-accurate problem. take one 
                 # time-marched step and record the value
-                t_stepped = []
-                f_stepped = []                
+                if start_time_marching_at == 'both ends':
+                    t_stepped_1 = []
+                    f_stepped_1 = []
+                    t_stepped_2 = []
+                    f_stepped_2 = []
+                else:
+                    t_stepped = []
+                    f_stepped = []                
                 # run through the time comparison points
                 for i in range(n_comp_points):
                     # take a time-accurate step from the last one, starting at 0
                     if i == 0:
                         # set the "initial condition" for the time-marched bit
-                        if start_time_maraching_at == 'first instance':
+                        if start_time_marching_at == 'first instance':
                             # solution at the first time instance
                             f_stepped_i = copy.copy(f_HB[0])
                             # first time instance (always 0.0)
                             t_stepped_i = copy.copy(t_HB[0])
-                        if start_time_maraching_at == 'last instance':
+                        if start_time_marching_at == 'last instance':
                             # solution at the last time instance
                             f_stepped_i = copy.copy(f_HB[-1])
                             # last time instance
                             t_stepped_i = copy.copy(t_HB[-1])
+                        if start_time_marching_at == 'both ends':
+                            f_stepped_1_i = copy.copy(f_HB[0])
+                            t_stepped_1_i = copy.copy(t_HB[0])
+                            f_stepped_2_i = copy.copy(f_HB[-1])
+                            t_stepped_2_i = copy.copy(t_HB[-1])
                     else:
-                        f_stepped_i += delta_t*the_ode.evaluate(t_stepped_i,f_stepped_i[0])
-                        t_stepped_i += delta_t
-                    # record the stepped time points
-                    t_stepped.append(t_stepped_i)
-                    # record the time-marched value
-                    f_stepped.append(f_stepped_i[0])
+                        if start_time_marching_at == 'both ends':
+                            f_stepped_1_i += delta_t*the_ode.evaluate(t_stepped_1_i,f_stepped_1_i[0])
+                            t_stepped_1_i += delta_t
+                            f_stepped_2_i += delta_t*the_ode.evaluate(t_stepped_2_i,f_stepped_2_i[0])
+                            t_stepped_2_i += delta_t
+                        else:
+                            # advance the solution by taking a time step
+                            f_stepped_i += delta_t*the_ode.evaluate(t_stepped_i,f_stepped_i[0])
+                            t_stepped_i += delta_t
+                    if start_time_marching_at == 'both ends':
+                        t_stepped_1.append(t_stepped_1_i)
+                        f_stepped_1.append(f_stepped_1_i[0])
+                        t_stepped_2.append(t_stepped_2_i)
+                        f_stepped_2.append(f_stepped_2_i[0])
+                    else:
+                        # record the stepped time points
+                        t_stepped.append(t_stepped_i)
+                        # record the time-marched value
+                        f_stepped.append(f_stepped_i[0])
                 # compute the first derivative of the time-marched curve (using 
                 # central differences, i.e. exluding the first and last points)
-                dfdt_stepped = []
+                if start_time_marching_at == 'both ends':
+                    dfdt_stepped_1 = []
+                    dfdt_stepped_2 = []
+                else:
+                    dfdt_stepped = []
                 for i in range(n_comp_points):
                     if i == 0 or i == n_comp_points-1:
-                        dfdt_stepped.append('nan')
+                        # at the first and last points, append a nan
+                        if start_time_marching_at == 'both ends':
+                            dfdt_stepped_1.append('nan')
+                            dfdt_stepped_2.append('nan')
+                        else:
+                            dfdt_stepped.append('nan')
                     else:
-                        dfdt_stepped_i = (f_stepped[i+1]-f_stepped[i-1])/(2.0*delta_t)
-                        dfdt_stepped.append(dfdt_stepped_i)
+                        # take a central difference and store the result
+                        if start_time_marching_at == 'both ends':
+                            dfdt_stepped_1_i = (f_stepped_1[i+1]-f_stepped_1[i-1])/(2.0*delta_t)
+                            dfdt_stepped_1.append(dfdt_stepped_1_i)
+                            dfdt_stepped_2_i = (f_stepped_2[i+1]-f_stepped_2[i-1])/(2.0*delta_t)
+                            dfdt_stepped_2.append(dfdt_stepped_2_i)
+                        else:
+                            dfdt_stepped_i = (f_stepped[i+1]-f_stepped[i-1])/(2.0*delta_t)
+                            dfdt_stepped.append(dfdt_stepped_i)
                 # use linear interpolation to recover the values of the 
                 # interpolant and the interpolant's derivative at the stepped
                 # locations
-                f_HB_int_stepped = []
-                dfdt_HB_int_stepped = []
-                for i in range(n_comp_points):  
-                    # use linear interpolation to recover the value of the 
-                    # spectral interpolant at the i-th stepped time point
-                    t_stepped_i_point, f_HB_int_stepped_i = linearInterp(t_HB_int, f_HB_int, [t_stepped[i]])
-                    # pull the value out of the array
-                    f_HB_int_stepped_i = copy.copy(f_HB_int_stepped_i[0])
-                    # append to the list
-                    f_HB_int_stepped.append(f_HB_int_stepped_i)  
-                    # use linear interpolation to recover the value of the time
-                    # derivative of the spectral interpolant at the i-th 
-                    # stepped time point
-                    t_stepped_i_point, dfdt_HB_int_stepped_i = linearInterp(t_HB_int, dfdt_HB_int, [t_stepped[i]])
-                    # pull the value out of the array
-                    dfdt_HB_int_stepped_i = copy.copy(dfdt_HB_int_stepped_i[0])
-                    # append to the list
-                    dfdt_HB_int_stepped.append(dfdt_HB_int_stepped_i)  
+                if start_time_marching_at == 'both ends':
+                    f_HB_int_stepped_1 = []
+                    dfdt_HB_int_stepped_1 = []
+                    f_HB_int_stepped_2 = []
+                    dfdt_HB_int_stepped_2 = []
+                else:
+                    f_HB_int_stepped = []
+                    dfdt_HB_int_stepped = []
+                for i in range(n_comp_points):
+                    if start_time_marching_at == 'both ends':
+                        # point on the interpolant - first track
+                        t_stepped_1_i_point, f_HB_int_stepped_1_i = linearInterp(t_HB_int, f_HB_int, [t_stepped_1[i]])
+                        f_HB_int_stepped_1_i = copy.copy(f_HB_int_stepped_1_i[0])
+                        f_HB_int_stepped_1.append(f_HB_int_stepped_1_i)
+                        # point on the interpolant derivative - first track
+                        t_stepped_1_i_point, dfdt_HB_int_stepped_1_i = linearInterp(t_HB_int, dfdt_HB_int, [t_stepped_1[i]])
+                        dfdt_HB_int_stepped_1_i = copy.copy(dfdt_HB_int_stepped_1_i[0])
+                        dfdt_HB_int_stepped_1.append(dfdt_HB_int_stepped_1_i)
+                        # point on the interpolant - second track
+                        t_stepped_2_i_point, f_HB_int_stepped_2_i = linearInterp(t_HB_int, f_HB_int, [t_stepped_2[i]])
+                        f_HB_int_stepped_2_i = copy.copy(f_HB_int_stepped_2_i[0])
+                        f_HB_int_stepped_2.append(f_HB_int_stepped_2_i)
+                        # point on the interpolant derivative - second track
+                        t_stepped_2_i_point, dfdt_HB_int_stepped_2_i = linearInterp(t_HB_int, dfdt_HB_int, [t_stepped_2[i]])
+                        dfdt_HB_int_stepped_2_i = copy.copy(dfdt_HB_int_stepped_2_i[0])
+                        dfdt_HB_int_stepped_2.append(dfdt_HB_int_stepped_2_i)
+                    else:
+                        # use linear interpolation to recover the value of the 
+                        # spectral interpolant at the i-th stepped time point
+                        t_stepped_i_point, f_HB_int_stepped_i = linearInterp(t_HB_int, f_HB_int, [t_stepped[i]])
+                        # pull the value out of the array
+                        f_HB_int_stepped_i = copy.copy(f_HB_int_stepped_i[0])
+                        # append to the list
+                        f_HB_int_stepped.append(f_HB_int_stepped_i)  
+                        # use linear interpolation to recover the value of the time
+                        # derivative of the spectral interpolant at the i-th 
+                        # stepped time point
+                        t_stepped_i_point, dfdt_HB_int_stepped_i = linearInterp(t_HB_int, dfdt_HB_int, [t_stepped[i]])
+                        # pull the value out of the array
+                        dfdt_HB_int_stepped_i = copy.copy(dfdt_HB_int_stepped_i[0])
+                        # append to the list
+                        dfdt_HB_int_stepped.append(dfdt_HB_int_stepped_i)  
                 # cost #1: sum of mean-squared errors of the function values
                 costs_1 = []
                 for i in range(n_comp_points):
-                    cost_1_i = (f_stepped[i]-f_HB_int_stepped[i])**2.0
+                    if start_time_marching_at == 'both ends':
+                        cost_1_i = (f_stepped_1[i]-f_HB_int_stepped_1[i])**2.0 + (f_stepped_2[i]-f_HB_int_stepped_2[i])**2.0
+                    else:
+                        cost_1_i = (f_stepped[i]-f_HB_int_stepped[i])**2.0
                     costs_1.append(cost_1_i)
                 cost_1 = sum(costs_1)
                 # cost #2: sum the mean-squared errors of the derivative values
@@ -1226,7 +1317,10 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                     if i==0 or i==n_comp_points-1:
                         cost_2_i = 0.0
                     else:
-                        cost_2_i = (dfdt_stepped[i]-dfdt_HB_int_stepped[i])**2.0
+                        if start_time_marching_at == 'both ends':
+                            cost_2_i = (dfdt_stepped_1[i]-dfdt_HB_int_stepped_1[i])**2.0 + (dfdt_stepped_2[i]-dfdt_HB_int_stepped_2[i])**2.0
+                        else:
+                            cost_2_i = (dfdt_stepped[i]-dfdt_HB_int_stepped[i])**2.0
                     costs_2.append(cost_2_i)
                 cost_2 = sum(costs_2)
                 # cost #3: sum costs 1 and 2 (excluding the end points)
@@ -1242,13 +1336,17 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                     cost = cost_2
                 else:
                     cost = cost_3
+                # if desired, exponentially scale the cost
+                if exponentially_scale_cost:
+                    cost = np.exp(cost)
+                # print the cost to the console and record it
                 print('\n\tcost =', cost)
                 cost_history.append(cost)
                 # check cauchy condition to see if optimization should go on
                 if abs(cost - previous_cost) <= cauchy_criterion:
                     optimize_omegas = False
                     make_opt_plot = True
-                else:
+                else:  
                     previous_cost = cost
                 # record the location of the time instances for this iteration
                 t_HB_history.append(t_HB)
@@ -1257,17 +1355,29 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 # record the times and function values of the interpolation
                 t_HB_int_history.append(t_HB_int)
                 f_HB_int_history.append(f_HB_int)
-                # record the location of the stepped points for this instance 
-                # (these shouldn't change if only stepping forward from 0.0)
-                t_stepped_history.append(t_stepped)
-                # record the time-marched values
-                f_stepped_history.append(f_stepped)
-                # record the derivatives of the time-marched values
-                dfdt_stepped_history.append(dfdt_stepped)
-                # record the interpolant values at the stepped points
-                f_HB_int_stepped_history.append(f_HB_int_stepped)
-                # record the interpolant-derivative values at stepped points
-                dfdt_HB_int_stepped_history.append(dfdt_HB_int_stepped)
+                if start_time_marching_at == 'both ends':
+                    t_stepped_1_history.append(t_stepped_1)
+                    f_stepped_1_history.append(f_stepped_1)
+                    t_stepped_2_history.append(t_stepped_2)
+                    f_stepped_2_history.append(f_stepped_2)
+                    dfdt_stepped_1_history.append(dfdt_stepped_1)
+                    dfdt_stepped_2_history.append(dfdt_stepped_2)
+                    f_HB_int_stepped_1_history.append(f_HB_int_stepped_1)
+                    f_HB_int_stepped_2_history.append(f_HB_int_stepped_2)
+                    dfdt_HB_int_stepped_1_history.append(dfdt_HB_int_stepped_1)
+                    dfdt_HB_int_stepped_2_history.append(dfdt_HB_int_stepped_2)
+                else:
+                    # record the location of the stepped points for this instance 
+                    # (these shouldn't change if only stepping forward from 0.0)
+                    t_stepped_history.append(t_stepped)
+                    # record the time-marched values
+                    f_stepped_history.append(f_stepped)
+                    # record the derivatives of the time-marched values
+                    dfdt_stepped_history.append(dfdt_stepped)
+                    # record the interpolant values at the stepped points
+                    f_HB_int_stepped_history.append(f_HB_int_stepped)
+                    # record the interpolant-derivative values at stepped points
+                    dfdt_HB_int_stepped_history.append(dfdt_HB_int_stepped)
                 # record the omegas used to compute the previous solution
                 omegas_history.append(omegas)
                 print('\n\tomegas =', str(omegas)[1:-1])
@@ -1277,12 +1387,12 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                     # respect to the k-th angular frequency
                     cost_1_derivatives = []
                     for i in range(n_comp_points):
-                        if start_time_maraching_at == 'first instance':
+                        if start_time_marching_at == 'first instance':
                             cost_1_derivative_i = 2.0*i*delta_t* \
                                         (f_stepped[i]-f_HB_int_stepped[i])* \
                                         (a[k+1]*math.sin(omegas[k]*i*delta_t) \
                                         - b[k+1]*math.cos(omegas[k]*i*delta_t))
-                        if start_time_maraching_at == 'last instance':
+                        if start_time_marching_at == 'last instance':
                             # for omega_1
                             if k==0:                                
                                 cost_1_derivative_i = 2.0*i*delta_t* \
@@ -1295,6 +1405,27 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                                         (f_stepped[i]-f_HB_int_stepped[i])* \
                                         (a[k+1]*math.sin(omegas[k]*t_stepped[i]) \
                                         - b[k+1]*math.cos(omegas[k]*t_stepped[i]))
+                        if start_time_marching_at == 'both ends':
+                            # for omega_1
+                            if k==0:
+                                cost_1_derivative_i = 2.0*i*delta_t* \
+                                (f_stepped_1[i]-f_HB_int_stepped_1[i])* \
+                                        (a[k+1]*math.sin(omegas[k]*i*delta_t) \
+                                        - b[k+1]*math.cos(omegas[k]*i*delta_t)) \
+                                                    + 2.0*i*delta_t* \
+                                                    (f_stepped_2[i]-f_HB_int_stepped_2[i])* \
+                                        (a[k+1]*math.sin(omegas[k]*t_stepped_2[i]) \
+                                        - b[k+1]*math.cos(omegas[k]*t_stepped_2[i]))
+                            # for all the other omegas
+                            else:
+                                cost_1_derivative_i = 2.0*i*delta_t* \
+                                        (f_stepped_1[i]-f_HB_int_stepped_1[i])* \
+                                        (a[k+1]*math.sin(omegas[k]*i*delta_t) \
+                                        - b[k+1]*math.cos(omegas[k]*i*delta_t)) \
+                                                    + 2.0*t_stepped_2[i]* \
+                                        (f_stepped_2[i]-f_HB_int_stepped_2[i])* \
+                                        (a[k+1]*math.sin(omegas[k]*t_stepped_2[i]) \
+                                        - b[k+1]*math.cos(omegas[k]*t_stepped_2[i]))
                         # record the derivative of this omega    
                         cost_1_derivatives.append(cost_1_derivative_i)
                     dcost1_domega_k = sum(cost_1_derivatives)
@@ -1305,9 +1436,38 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                         if i==0 or i==n_comp_points-1:
                             cost_2_derivative_i = 0.0
                         else:
-                            cost_2_derivative_i = 2.0*(dfdt_stepped[i] - dfdt_HB_int_stepped[i]) \
+                            if start_time_marching_at == 'first instance':
+                                cost_2_derivative_i = 2.0*(dfdt_stepped[i] - dfdt_HB_int_stepped[i]) \
                                                     *((b[k+1]-omegas[k]*i*delta_t*a[k+1])*math.cos(omegas[k]*i*delta_t) \
                                                       -(a[k+1]+omegas[k]*i*delta_t*b[k+1])*math.sin(omegas[k]*i*delta_t))
+                            if start_time_marching_at == 'last instance':
+                                # for the first omega
+                                if k==0:
+                                    cost_2_derivative_i = 2.0*(dfdt_stepped[i] - dfdt_HB_int_stepped[i]) \
+                                                    *((a[k+1]+omegas[k]*b[k+1]*i*delta_t)*math.sin(omegas[k]*t_stepped[i]) \
+                                                     +(omegas[k]*a[k+1]*i*delta_t-b[k+1])*math.cos(omegas[k]*t_stepped[i]))
+                                # for all the others
+                                else:
+                                    cost_2_derivative_i = 2.0*(dfdt_stepped[i] - dfdt_HB_int_stepped[i]) \
+                                                    *((a[k+1]+omegas[k]*b[k+1]*t_stepped[i])*math.sin(omegas[k]*t_stepped[i]) \
+                                                     +(omegas[k]*a[k+1]*t_stepped[i]-b[k+1])*math.cos(omegas[k]*t_stepped[i]))
+                            if start_time_marching_at == 'both ends':
+                                # for the first omega
+                                if k==0:
+                                    cost_2_derivative_i = 2.0*(dfdt_stepped_1[i] - dfdt_HB_int_stepped_1[i]) \
+                                                    *((b[k+1]-omegas[k]*i*delta_t*a[k+1])*math.cos(omegas[k]*i*delta_t) \
+                                                      -(a[k+1]+omegas[k]*i*delta_t*b[k+1])*math.sin(omegas[k]*i*delta_t)) \
+                                                        + 2.0*(dfdt_stepped_2[i] - dfdt_HB_int_stepped_2[i]) \
+                                                    *((a[k+1]+omegas[k]*b[k+1]*i*delta_t)*math.sin(omegas[k]*t_stepped_2[i]) \
+                                                     +(omegas[k]*a[k+1]*i*delta_t-b[k+1])*math.cos(omegas[k]*t_stepped_2[i]))
+                                # for all the others
+                                else:
+                                    cost_2_derivative_i = 2.0*(dfdt_stepped_1[i] - dfdt_HB_int_stepped_1[i]) \
+                                                    *((b[k+1]-omegas[k]*i*delta_t*a[k+1])*math.cos(omegas[k]*i*delta_t) \
+                                                      -(a[k+1]+omegas[k]*i*delta_t*b[k+1])*math.sin(omegas[k]*i*delta_t)) \
+                                                        + 2.0*(dfdt_stepped_2[i] - dfdt_HB_int_stepped_2[i]) \
+                                                    *((a[k+1]+omegas[k]*b[k+1]*t_stepped_2[i])*math.sin(omegas[k]*t_stepped_2[i]) \
+                                                     +(omegas[k]*a[k+1]*t_stepped_2[i]-b[k+1])*math.cos(omegas[k]*t_stepped_2[i]))
                         cost_2_derivatives.append(cost_2_derivative_i)
                     dcost2_domega_k = sum(cost_2_derivatives)
                     # compute the derivative of the third cost function with 
@@ -1320,12 +1480,13 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                         dC_domega_k = dcost2_domega_k
                     else:
                         dC_domega_k = dcost3_domega_k
+                    # if desired, use the exponentially scaled cost gradient
+                    if exponentially_scale_cost:
+                        dC_domega_k = dC_domega_k*cost
                     # set "velocity" value for momentum gradient descent
-                    v = gamma*v + eta*dC_domega_k
+                    v[k] = gamma*v[k] + eta*dC_domega_k
                     # update the value of omega using momentum gradient descent
-                    omegas[k] = omegas[k] - v
-                    # round the new omega to desired accuracy
-                    #omegas[k] = round(omegas[k],3)
+                    omegas[k] = omegas[k] - v[k]
                 # sort them in ascending order
                 omegas = sorted(omegas)
                 # if using the T1 time discretization, check to see if these 
@@ -1453,24 +1614,31 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             animate_plot = make_movie
             plot_name = 'omega optimization'
             n_images = len(omegas_history)  # total number of images computed
-            skip_images = 75                 # images to skip between frames
+            skip_images = 25                 # images to skip between frames
             auto_play = auto_play_movie     # automatically play the movie
             auto_open = auto_open_plot      # automatically open the final image
             # plotting: instantiate the figure
             fig = plt.figure(plot_name,figsize=(10,10))
             # white space for the first plot
             f_white_space = max(f_HB_int_history[0])-min(f_HB_int_history[0])
-            # things that won't change for the residual history plot
+            # things that won't change for the cost history plot
             plt.subplot(3,1,2)
             plt.xlabel('$optimizing \,\, iteration$', fontsize=16)
             plt.ylabel('$C$', fontsize=16)
-            plt.xlim(0.0,len(omegas_history))
+            plt.xlim(0.0,len(omegas_history)-1.0)
             white_space = 0.25*(max(cost_history)-min(cost_history))
             plt.ylim(min(cost_history)-white_space, max(cost_history)+white_space)
-            # create the title for the cost plot
+            # create the appropriate title for the cost plot
             cost_title = '$C = '
-            cost_1_title = '\sum_{i=0}^{n_{cp}-1} [ f_i - \\tilde{f}(i\Delta t)]^2'
-            cost_2_title = '\sum_{l=1}^{n_{cp}-2} [ \dot{f}_l - \dot{\\widetilde{f}}(l\Delta t)]^2'
+            if start_time_marching_at == 'first instance':
+                cost_1_title = '\sum_{i=0}^{n_{cp}-1} [ f_i - \\tilde{f}(i\Delta t)]^2'
+                cost_2_title = '\sum_{l=1}^{n_{cp}-2} [ \dot{f}_l - \dot{\\widetilde{f}}(l\Delta t)]^2'
+            if start_time_marching_at == 'last instance':
+                cost_1_title = '\sum_{i=0}^{n_{cp}-1} [ f_i - \\tilde{f}(t_{N-1}^{HB}+i\Delta t)]^2'
+                cost_2_title = '\sum_{l=1}^{n_{cp}-2} [ \dot{f}_l - \dot{\\widetilde{f}}(t_{N-1}^{HB}+l\Delta t)]^2'
+            if start_time_marching_at == 'both ends':
+                cost_1_title = '\sum_{i=0}^{n_{cp}-1} [ f_i^{(1)} - \\tilde{f}(i\Delta t)]^2 + [ f_i^{(2)} - \\tilde{f}(t_{N-1}^{HB}+i\Delta t)]^2'
+                cost_2_title = '\sum_{l=1}^{n_{cp}-2} [ \dot{f}_l^{(1)} - \dot{\\widetilde{f}}(l\Delta t)]^2 + [ \dot{f}_l^{(2)} - \dot{\\widetilde{f}}(t_{N-1}^{HB}+l\Delta t)]^2'
             cost_3_title = cost_1_title + '+' + cost_2_title
             if use_cost_number==1:
                 cost_title += cost_1_title
@@ -1482,12 +1650,14 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             plt.title(cost_title, y=1.07)
             # things that won't be changing in the omegas plot
             plt.subplot(3,1,3)
-            plt.plot(list(range(1,K+1)), omegas_history[0],'bo')
-            plt.xlabel('$k$')
-            plt.ylabel('$\omega_k$')
-            plt.xlim(0,K+1)
-            white_space = max(omegas_history[0])-min(omegas_history[0])
-            plt.ylim(min(omegas_history[0])-white_space,max(omegas_history[0])+white_space)
+            omega_colors = ['orange', 'g', 'b', 'm', 'brown', 'r', 'k']
+            # create histories for each individual omega, for the omegas plot
+            individual_omega_histories = [[] for k in range(K)]
+            for omegas_set in omegas_history:
+                counter = 0
+                for omega_k in omegas_set:
+                    individual_omega_histories[counter].append(omega_k)
+                    counter += 1
             # plotting: set the total number of frames
             if animate_plot == True:
                 # capture all frames (skipping, if necessary) and the final frame
@@ -1506,13 +1676,27 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                     plt.plot(t_HB_int_history[n],f_HB_int_history[n],'y-', label='$\\widetilde{f}$')
                     plt.plot(t_HB_history[n],f_HB_history_opt[n],'ko')
                     for index in range(n_comp_points):
-                        plt.plot([t_stepped_history[n][index]]*2, [f_stepped_history[n][index], f_HB_int_stepped_history[n][index]],'c-')
-                    plt.plot(t_stepped_history[n],f_stepped_history[n],'b.-', label='$f$')
-                    plt.plot(t_stepped_history[n],f_HB_int_stepped_history[n],'y.')
+                        if start_time_marching_at == 'both ends':
+                            plt.plot([t_stepped_1_history[n][index]]*2, [f_stepped_1_history[n][index], f_HB_int_stepped_1_history[n][index]],'c-')
+                            plt.plot([t_stepped_2_history[n][index]]*2, [f_stepped_2_history[n][index], f_HB_int_stepped_2_history[n][index]],'c-')
+                        else:
+                            plt.plot([t_stepped_history[n][index]]*2, [f_stepped_history[n][index], f_HB_int_stepped_history[n][index]],'c-')
+                    if start_time_marching_at == 'both ends':
+                        plt.plot(t_stepped_1_history[n],f_HB_int_stepped_1_history[n],'y.')
+                        plt.plot(t_stepped_1_history[n],f_stepped_1_history[n],'b.-', label='$f^{(1)}$')
+                        plt.plot(t_stepped_2_history[n],f_HB_int_stepped_2_history[n],'y.')
+                        plt.plot(t_stepped_2_history[n],f_stepped_2_history[n],'b.-', label='$f^{(2)}$')
+                    else:
+                        plt.plot(t_stepped_history[n],f_stepped_history[n],'b.-', label='$f$')
+                        plt.plot(t_stepped_history[n],f_HB_int_stepped_history[n],'y.')
                     plt.xlabel('$t, [s]$', fontsize=16)
                     plt.ylabel('$f(t)$', fontsize=16)
-                    plt.xlim(0.0, 1.5*delta_t*n_comp_points)
-                    plt.ylim(f_stepped_history[0][0]-f_white_space, f_stepped_history[0][0]+f_white_space)
+                    if start_time_marching_at == 'both ends':
+                        plt.xlim(0.0, 1.5*t_stepped_2_history[-1][-1])
+                        plt.ylim(f_stepped_1_history[0][0]-f_white_space, f_stepped_1_history[0][0]+f_white_space)
+                    else:
+                        plt.xlim(0.0, 1.5*t_stepped_history[-1][-1])
+                        plt.ylim(f_stepped_history[0][0]-f_white_space, f_stepped_history[0][0]+f_white_space)
                     plt.legend(loc='best')
                     # cost plot
                     plt.subplot(3,1,2)
@@ -1520,17 +1704,24 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                         plt.plot(cost_history[:n+1],'g-')
                     else:
                         plt.plot(cost_history[:n+1],'r-')
-                    # omegas trajectory plot
+                    # omega trajectories plot
                     plt.subplot(3,1,3)
-                    if n == n_images-1:
-                        plt.plot(list(range(1,K+1)), omegas_history[n],'r*')
-                    else:
-                        plt.plot(list(range(1,K+1)), omegas_history[n],'k.')
+                    plt.cla()
+                    for counter in range(K):
+                        plt.plot(range(n+1),individual_omega_histories[counter][:n+1], color=omega_colors[counter], label='$\omega_{'+str(counter)+'}$')
+                        plt.plot(n, individual_omega_histories[counter][n], color=omega_colors[counter], marker='.')                      
+                    plt.xlabel('$optimizing \,\, iteration$', fontsize=16)
+                    plt.ylabel('$\omega_k$')
+                    plt.xlim(0.0,len(omegas_history)-1.0)
+                    white_space = max(omegas_history[0])-min(omegas_history[0])
+                    plt.ylim(min(omegas_history[0])-0.5*white_space,max(omegas_history[0])+0.5*white_space)                    
+                    #plt.legend(loc='best')
                     title = ''
-                    counter=1
+                    counter = 1
                     for omega in omegas_history[n]:
                         title = title + '$\omega_{'+str(counter)+'} ='+str(np.round(omega,4))+'\quad $'
                         counter += 1
+                    title += '$\quad\quad\eta = '+str(eta)+'$'
                     plt.title(title)
                     # set the spacing options
                     plt.tight_layout()
@@ -1556,8 +1747,11 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             # open the saved image, if desired
             if auto_open:
                 webbrowser.open(file_name)
-    # return the converged solution
-    return t_HB, f_HB
+    # return the converged solution and, if computed, the frequencies found
+    if make_opt_plot:
+        return t_HB, f_HB, omegas
+    else:
+        return t_HB, f_HB
 #-----------------------------------------------------------------------------#
 def HB_sol_plus_DFT(B, kappa, time_discretization, the_ode, HB_initial_guess,
                     partial_convergence, AC_energy_to_capture):
@@ -1733,9 +1927,12 @@ omegas = peaks_found
 
 omegas = [2.4, 3.5, 4.6, 6.7]
 
+# record the initial guess for the angular frequencies
+initial_guess_omegas = copy.copy(omegas)
 # using these omegas as initial guesses, solve an HB problem while optimizing
 # the angular frequencies using time-accurate comparisons and gradient descent
-t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
+# N.B. when optimizing frequencies, the function returns three variables
+t_HB, f_HB, omegas = solve_HB_problem(omegas, time_discretization, the_ode, 
                                 delta_tau=0.01, 
                                 constant_init_guess=10.0, 
                                 residual_convergence_criteria=1e-5,
@@ -1750,8 +1947,8 @@ t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
 T_HB_sol = period_given_freqs(omegas)
 # now, round the angular-frequencies (to a desired number of decimal points) 
 # and recompute the 
-desired_decimals = 2
-rounded_omegas = [round(omega,desired_decimals) for omega in omegas]
+desired_decimals = 1
+rounded_omegas = [float(round(omega,desired_decimals)) for omega in omegas]
 T_HB_sol_rounded = period_given_freqs(rounded_omegas)
 
 ##########################################################
@@ -1899,16 +2096,27 @@ if auto_open:
 ################################################
 
 # actual periods of the HB solution and the actual ODE solution
+print('\n------------------------------------------------------------------\n')
 print('\n-true periods of solutions, based on given angular frequencies:')
+print('\n (n.b. these values are not unique! different combinations of ')
+print('\n       angular frequencies can yield the same "long" period)')
 print('\n\tperiod of the HB solution, based on omegas used:', round(T_HB_sol,3))
 print('\n\t( period of HB solution, based on rounded omegas:', round(T_HB_sol_rounded,3),')')
 print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
 
+# print information about the angular frequencies
+print('\n-a look at the angular frequencies:')
+print('\n\t-intial guess [rad/s]:')
+print('\n\t\t'+str(initial_guess_omegas))
+print('\n\t-values used [rad/s]:')
+print('\n\t\t'+str(omegas))
+print('\n\t-values used (rounded) [rad/s]:')
+print('\n\t\t'+str(rounded_omegas))
+print('\n\t-actual values [rad/s]:')
+print('\n\t\t'+str(actual_omegas))
+
 # print information about the HB operator
-print('\n-a look at the HB operator:\n')
-print('\tomegas =', omegas)
-print('\n\t( omegas(rounded) =', str(rounded_omegas),')')
-print('\n\t( omegas(actual) =', str(actual_omegas),')')
+print('\n\n-a look at the HB operator:')
 print('\n\tK = '+str(len(omegas)))
 N = 2*len(omegas)+1
 print('\n\tN = '+str(N))
