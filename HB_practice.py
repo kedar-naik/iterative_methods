@@ -11,6 +11,7 @@ import numpy as np
 import webbrowser
 import copy
 from functools import reduce
+import sys                               # for finding machine zero
 
 from time_spectral import myLinspace, myNorm, linearInterp
 from iterative_methods import my_inv, my_pinv
@@ -1050,12 +1051,14 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     f_HB_history = [np.copy(f_HB)]
     # create a list for the residual evolution history
     residual_history = []
+    
     # set some preliminaries if changing omegas w/ gradient descent
     if optimize_omegas:
         # learning rate for gradient descent
-        eta = 1e-5
-        # level of partial convergence to begin optimizing the omegas
+        eta = 1e-4
+        # level of partial convergence to begin optimizing the omegas (value, 'almost full convergence')
         partial_convergence_level = 1e-1
+        partial_convergence_level = 'almost full convergence'
         # set where to start ('first instance', 'last instance', 'both ends')
         start_time_marching_at = 'first instance'
         #start_time_marching_at = 'last instance'
@@ -1063,15 +1066,23 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         # specify which cost function to use (1 = curve, 2=derivative, 3=both)
         use_cost_number = 1
         # exponentially scale the cost function 
-        exponentially_scale_cost = True
+        exponentially_scale_cost = False
         # cauchy criterion for the cost
-        cauchy_criterion = 1e-4
+        cauchy_criterion = 1e-6
+        # the length of the time-accurate segment, as a percent of T1
+        percent_T1_spanned = 100.0
         # compute the time interval between HB time in
         t_HB_interval = t_HB[1]
         # set the time step for the time-accurate steps
         delta_t = t_HB_interval/50.0
         # no. of comparison points between interpolant and time-accurate points
-        n_comp_points = int(1.0*((2.0*np.pi/omegas[0])/delta_t - 1))
+        n_comp_points = int((percent_T1_spanned/100.0)*((2.0*np.pi/omegas[0])/delta_t - 1))
+        # set the value to use "full convergence," using machine zero
+        if partial_convergence_level == 'almost full convergence':
+            machine_zero = sys.float_info.epsilon
+            fully_converged = 1e3*machine_zero
+            almost_fully_converged = 10*fully_converged
+            partial_convergence_level = almost_fully_converged
         # count up the number of omegas being used
         K = len(omegas)
         # define the number of time instances
@@ -1110,15 +1121,12 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         # 0 < gamma < 1 : current gradient is added to all the previous
         #                 gradients, but with decreasing weights the farther 
         #                 they get from the current iteration
-        gamma = 0.0
+        gamma = 0.5
         # initialize "velocity" values for momentum gradient descent for each
         # of the K omegas
         v = [0.0]*K
         # initialize previous_cost to a very big number
         previous_cost = 1e6
-        
-        
-        
         
         
     # set the flag for the optimization plotting
@@ -1527,7 +1535,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         animate_plot = make_movie
         plot_name = 'harmonic-balance ODE'
         n_images = iteration+1                  # total number of images computed
-        skip_images = 260                 # images to skip between frames
+        skip_images = 5000                 # images to skip between frames
         auto_play = auto_play_movie     # automatically play the movie
         auto_open = auto_open_plot      # automatically open the final image
         # plotting: instantiate the figure
@@ -1810,10 +1818,15 @@ def HB_sol_plus_DFT(B, kappa, time_discretization, the_ode, HB_initial_guess,
 # solve the equation using the harmonic-balance method #
 ########################################################
 
+# set the value to use "full convergence," using machine zero
+machine_zero = sys.float_info.epsilon
+fully_converged = 1e3*machine_zero
+
+# call the function to solve the HB problem
 t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
                             delta_tau=0.01, 
                             constant_init_guess=10.0, 
-                            residual_convergence_criteria=1e-5, 
+                            residual_convergence_criteria=fully_converged, 
                             make_plot=True, auto_open_plot=False, 
                             make_movie=False, auto_play_movie=False,
                             optimize_omegas=False)
@@ -1921,11 +1934,10 @@ for i in range(max_contractions):
 omegas = peaks_found
 
 # FOR TESTING ONLY!!!
-#omegas = [1.5, 2.5, 4.5, 5.5]
 #omegas = actual_omegas
-#omegas = [3.0, 4.0, 5.0, 6.0]
+#omegas[0] = 1.31
 
-omegas = [2.4, 3.5, 4.6, 6.7]
+#omegas = [2.4, 3.5, 4.6, 6.7]
 
 # record the initial guess for the angular frequencies
 initial_guess_omegas = copy.copy(omegas)
@@ -1935,7 +1947,7 @@ initial_guess_omegas = copy.copy(omegas)
 t_HB, f_HB, omegas = solve_HB_problem(omegas, time_discretization, the_ode, 
                                 delta_tau=0.01, 
                                 constant_init_guess=10.0, 
-                                residual_convergence_criteria=1e-5,
+                                residual_convergence_criteria=fully_converged,
                                 make_plot=True, auto_open_plot=True, 
                                 make_movie=True, auto_play_movie=False,
                                 optimize_omegas=True)
