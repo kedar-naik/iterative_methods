@@ -1036,7 +1036,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             print('\n\t\t- omega #' + str(bad_omega_number) + ' (' + \
                   str(bad_omega_value) + ' rad/sec) is inadmissible!')
     # maximum number of pseudo-time steps to try (can be changed, if needed)
-    max_pseudo_steps = 800000
+    max_pseudo_steps = 10000000
     # print message to the screen
     if verbose:
         print('computing the harmonic-balance solution...')
@@ -1054,8 +1054,9 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     
     # set some preliminaries if changing omegas w/ gradient descent
     if optimize_omegas:
+        
         # learning rate for gradient descent
-        eta = 1e-4
+        eta = 1e-5
         # level of partial convergence to begin optimizing the omegas (value, 'almost full convergence')
         partial_convergence_level = 1e-1
         partial_convergence_level = 'almost full convergence'
@@ -1064,13 +1065,22 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         #start_time_marching_at = 'last instance'
         #start_time_marching_at = 'both ends'        
         # specify which cost function to use (1 = curve, 2=derivative, 3=both)
-        use_cost_number = 1
-        # exponentially scale the cost function 
-        exponentially_scale_cost = False
-        # cauchy criterion for the cost
-        cauchy_criterion = 1e-6
+        use_cost_number = 3
         # the length of the time-accurate segment, as a percent of T1
         percent_T1_spanned = 100.0
+        # exponentially scale the cost function 
+        exponentially_scale_cost = True
+        # cauchy criterion for the cost
+        cauchy_criterion = 1e-7
+        # "velocity" coefficient for momentum gradient descent, in range (0,1]
+        # gamma = 0 : regular gradient descent with learning rate eta
+        # gamma = 1 : current gradient is added to cummulative sum of all the 
+        #             gradients found from previous iterations
+        # 0 < gamma < 1 : current gradient is added to all the previous
+        #                 gradients, but with decreasing weights the farther 
+        #                 they get from the current iteration
+        gamma = 0.4
+        
         # compute the time interval between HB time in
         t_HB_interval = t_HB[1]
         # set the time step for the time-accurate steps
@@ -1114,14 +1124,6 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         # initialize interpolant vectors (just so the warning goes away)
         t_HB_int = []
         f_HB_int = []
-        # "velocity" coefficient for momentum gradient descent, in range (0,1]
-        # gamma = 0 : regular gradient descent with learning rate0 eta
-        # gamma = 1 : current gradient is added to cummulative sum of all the 
-        #             gradients found from previous iterations
-        # 0 < gamma < 1 : current gradient is added to all the previous
-        #                 gradients, but with decreasing weights the farther 
-        #                 they get from the current iteration
-        gamma = 0.5
         # initialize "velocity" values for momentum gradient descent for each
         # of the K omegas
         v = [0.0]*K
@@ -1535,7 +1537,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         animate_plot = make_movie
         plot_name = 'harmonic-balance ODE'
         n_images = iteration+1                  # total number of images computed
-        skip_images = 5000                 # images to skip between frames
+        skip_images = 100000                 # images to skip between frames
         auto_play = auto_play_movie     # automatically play the movie
         auto_open = auto_open_plot      # automatically open the final image
         # plotting: instantiate the figure
@@ -1638,6 +1640,8 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             plt.ylim(min(cost_history)-white_space, max(cost_history)+white_space)
             # create the appropriate title for the cost plot
             cost_title = '$C = '
+            if exponentially_scale_cost:
+                cost_title += 'exp('
             if start_time_marching_at == 'first instance':
                 cost_1_title = '\sum_{i=0}^{n_{cp}-1} [ f_i - \\tilde{f}(i\Delta t)]^2'
                 cost_2_title = '\sum_{l=1}^{n_{cp}-2} [ \dot{f}_l - \dot{\\widetilde{f}}(l\Delta t)]^2'
@@ -1654,6 +1658,8 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 cost_title += cost_2_title
             else:
                 cost_title += cost_3_title
+            if exponentially_scale_cost:
+                cost_title += ')'
             cost_title += '$'
             plt.title(cost_title, y=1.07)
             # things that won't be changing in the omegas plot
@@ -1934,11 +1940,15 @@ for i in range(max_contractions):
 omegas = peaks_found
 
 # FOR TESTING ONLY!!!
-#omegas = actual_omegas
-#omegas[0] = 1.31
+omegas = copy.copy(actual_omegas)
+omegas[0] = 1.31
+omegas[0] = 1.6
 
+# "random" values
 #omegas = [2.4, 3.5, 4.6, 6.7]
-
+# "close enough" values
+#omegas = [1.4000, 2.0, 3.7, 4.7]
+ 
 # record the initial guess for the angular frequencies
 initial_guess_omegas = copy.copy(omegas)
 # using these omegas as initial guesses, solve an HB problem while optimizing
@@ -2110,15 +2120,15 @@ if auto_open:
 # actual periods of the HB solution and the actual ODE solution
 print('\n------------------------------------------------------------------\n')
 print('\n-true periods of solutions, based on given angular frequencies:')
-print('\n (n.b. these values are not unique! different combinations of ')
-print('\n       angular frequencies can yield the same "long" period)')
+print('\n\t(n.b. these values are not unique! different combinations of ')
+print('\tangular frequencies can yield the same "long" period)')
 print('\n\tperiod of the HB solution, based on omegas used:', round(T_HB_sol,3))
 print('\n\t( period of HB solution, based on rounded omegas:', round(T_HB_sol_rounded,3),')')
 print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
 
 # print information about the angular frequencies
 print('\n-a look at the angular frequencies:')
-print('\n\t-intial guess [rad/s]:')
+print('\n\t-initial guess [rad/s]:')
 print('\n\t\t'+str(initial_guess_omegas))
 print('\n\t-values used [rad/s]:')
 print('\n\t\t'+str(omegas))
