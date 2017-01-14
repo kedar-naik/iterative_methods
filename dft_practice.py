@@ -654,9 +654,11 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                 if freq != refined_positive_freqs[-1]:
                     title += ', \,'
             title += title_suffix + '$'
-            # plot the title and the legend
+            # add the title and the legend
             plt.title(title)
             plt.legend(loc='best',fontsize=12)
+            # adjust the axes to fit the refined peaks
+            plt.xlim(-1.5*max(positive_freqs), 1.5*max(positive_freqs))
         # use "tight layout"
         plt.tight_layout()
         # save plot and close

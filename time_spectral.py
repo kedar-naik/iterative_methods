@@ -237,7 +237,7 @@ def fourierInterp(x, y, x_int=None):
     return (x_int, y_int, dydx_int)
 
 # this function linearly interpolates a series of points ######################
-def linearInterp(x, y, x_int=None, verbose=False):
+def linearInterp(x, y, x_int=[], verbose=False):
     
     """
     This function interpolates a given set of ordinates and abscissas with line
@@ -267,8 +267,7 @@ def linearInterp(x, y, x_int=None, verbose=False):
     n = len(x)                  
     
     # if x_int hasn't been given, set it
-    if x_int == None:
-        x_int = []
+    if x_int == []:
         for i in range(n-1):
             x_int.append(x[i])
             interval = (x[i+1]-x[i])/float(points_between+1)

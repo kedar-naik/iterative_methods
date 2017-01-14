@@ -25,7 +25,7 @@ v_0 = 1                     # intial wagon velocity, [m/s]
 t_0 = 0                     # intial time, [s]
 
 # time-step definition
-del_t = 0.001              # time step, [s]
+del_t = 0.0001              # time step, [s]
 t_end = 10                  # final time, [s]
 
 # create a dictionary defining the problem
@@ -190,7 +190,7 @@ def plot_spring(wagon_plot_name, x, flat_end_length, plot_func=False):
     
 #-----------------------------------------------------------------------------#
     
-def animate_wagon(t,x,auto_play=False):
+def animate_wagon(t, x, v, auto_play=False):
     '''
     This function takes in a time trace that describes the motion of a spring-
     mass system in one dimension and outputs a movie showing the evolution of
@@ -212,20 +212,22 @@ def animate_wagon(t,x,auto_play=False):
     plot_name = 'wagon_movie'
     movie_filename = plot_name+'.mp4'
     n_images = len(t)            # total number of images computed
-    skip_images = 70                   # images to skip between animation frames
+    skip_images = 1000                   # images to skip between animation frames
     
     # instantiate the figure
     fig = plt.figure(plot_name)
     # rescale the figure window to fit both subplots
     xdim, ydim = plt.gcf().get_size_inches()
-    plt.gcf().set_size_inches(xdim, 1.5*ydim, forward=True)
+    plt.gcf().set_size_inches(xdim, 1.2*ydim, forward=True)
     # things that will not be changing in the loop
     wagon_white_space = wagon_width
     trace_white_space = (max(x)-min(x))/4
+    x_white_space = (max(x)-min(x))/4
+    v_white_space = (max(v)-min(v))/4
     # list of all frames to be captured (skipping, if needed) plus final frame
     all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
     # plotting: capturing the movie
-    writer = animation.writers['ffmpeg'](fps=15)
+    writer = animation.writers['ffmpeg'](fps=11)
     with writer.saving(fig, movie_filename, 300):
         # initiate the frame counter
         frame = 0
@@ -242,14 +244,23 @@ def animate_wagon(t,x,auto_play=False):
             plt.xlabel('$x(t) \,,\, [\,m\,]$')
             plt.title('$t = '+str(round(t[n],2))+'s$')
             # plot the time trace
-            plt.subplot(2,1,2)
-            plt.cla()
-            plt.plot(t[:n],x[:n])
+            plt.subplot(2,2,3)
+            plt.plot(t[:n],x[:n],'b-')
             plt.xlim(0.0,max(t))
             plt.ylim(min(x)-trace_white_space, max(x)+trace_white_space)
             plt.xlabel('$t \,,\, [\,s\,]$')
             plt.ylabel('$x(t) \,,\, [\,m\,]$')
-            fig.subplots_adjust(hspace=.5)
+            # plot the phase portrait
+            plt.subplot(2,2,4)
+            plt.cla()
+            plt.plot(x[:n],v[:n],'r-')
+            plt.plot(x[n],v[n],'r.')
+            plt.xlim(min(x)-x_white_space,max(x)+x_white_space)
+            plt.ylim(min(v)-v_white_space,max(v)+v_white_space)
+            plt.xlabel('$x(t) \,,\, [\,m\,]$')
+            plt.ylabel('$v(t) \,,\, [\,m/s\,]$')
+            #fig.subplots_adjust(hspace=.5,wspace=0.3)
+            plt.tight_layout()            
             # progress monitor
             percent_done = float(n)*100.0/(n_images-1)
             print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
@@ -323,8 +334,18 @@ plt.close(time_trace_plot_name)
 # open the saved image
 webbrowser.open(time_trace_filename)
 
+# calculate the eigenvalues for the given constants
+lambda_1 = -1j*(k/m)**(1/2)
+lambda_2 = -lambda_1
+
+print('\n\teigenvalues of the homogeneous system:')
+print('\n    lambda_1:\t', lambda_1)
+print('    lambda_2:\t', lambda_2)
 
 
+
+
+'''
 # plot a wagon attached to a spring
 wagon_width = 0.25              # [m]
 wagon_position = 1.6            # [m]
@@ -342,7 +363,7 @@ print('\nfigure saved: '+str(wagon_plot_name)+'\n')
 plt.close(wagon_plot_name)
 # open saved image
 #webbrowser.open(wagon_filename)
-
+'''
 
 # animate the time-accurate solution
-animate_wagon(t,x,auto_play=True)
+animate_wagon(t, x, v, auto_play=True)

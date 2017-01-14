@@ -1056,22 +1056,22 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     if optimize_omegas:
         
         # learning rate for gradient descent
-        eta = 1e-5
+        eta = 1e-6
         # level of partial convergence to begin optimizing the omegas (value, 'almost full convergence')
         partial_convergence_level = 1e-1
         partial_convergence_level = 'almost full convergence'
         # set where to start ('first instance', 'last instance', 'both ends')
         start_time_marching_at = 'first instance'
         #start_time_marching_at = 'last instance'
-        #start_time_marching_at = 'both ends'        
+        start_time_marching_at = 'both ends'        
         # specify which cost function to use (1 = curve, 2=derivative, 3=both)
         use_cost_number = 3
         # the length of the time-accurate segment, as a percent of T1
-        percent_T1_spanned = 100.0
+        percent_T1_spanned = 50.0
         # exponentially scale the cost function 
         exponentially_scale_cost = True
         # cauchy criterion for the cost
-        cauchy_criterion = 1e-7
+        cauchy_criterion = 1e-6
         # "velocity" coefficient for momentum gradient descent, in range (0,1]
         # gamma = 0 : regular gradient descent with learning rate eta
         # gamma = 1 : current gradient is added to cummulative sum of all the 
@@ -1079,7 +1079,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         # 0 < gamma < 1 : current gradient is added to all the previous
         #                 gradients, but with decreasing weights the farther 
         #                 they get from the current iteration
-        gamma = 0.4
+        gamma = 0.7
         
         # compute the time interval between HB time in
         t_HB_interval = t_HB[1]
