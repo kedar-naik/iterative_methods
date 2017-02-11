@@ -240,12 +240,11 @@ def fourierInterp(x, y, x_int=None):
 def linearInterp(x, y, x_int=[], verbose=False):
     
     """
-    This function interpolates a given set of ordinates and abscissas with line
-    segments between given points onto the given grid of new abscissas. If no 
-    vector of desired abscissas is given, the set of interpolant abscissas is 
-    set automatically to include as many new points between the original ones
-    as specified below (set to 2, by default).
-    
+    This function interpolates a given set of ordered ordinates and abscissas 
+    with line segments between given points onto the given grid of new 
+    abscissas. If no vector of desired abscissas is given, the set of 
+    interpolant abscissas is set automatically to include as many new points 
+    between the original ones as specified below (set to 2, by default).
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
       - ordinates, y (as a list) (again, leave out last point, if periodic)
@@ -281,31 +280,55 @@ def linearInterp(x, y, x_int=[], verbose=False):
     # compute the interpolant
     y_int = []
     for i in range(n_int):
-        # for each x_int, find the two closest x values
-        distances = []
-        for k in range(n):
-            distances.append(abs(x_int[i]-x[k]))
-        sorted(distances)
-        indices = [distances.index(entry) for entry in sorted(distances)]
-        first_two_indices = indices[:2]
-        i1 = min(first_two_indices)
-        i2 = max(first_two_indices)
-        # if this x_int happens to be exactly halfway between two x values
-        if i1 == i2:
-            i2 = i1 + 1
-        # find the corresponding x and y values
-        x1 = x[i1]
-        x2 = x[i2]
-        y1 = y[i1]
-        y2 = y[i2]
+        # check if the interpolant point is smaller than the first abscissa
+        if x_int[i] < x[0]:
+            x1 = x[0]
+            y1 = y[0]
+            x2 = x[1]
+            y2 = y[1]
+        # check if the interpolant point is greater than the last abscissa
+        elif x_int[i] >= x[-1]:
+            x1 = x[-2]
+            y1 = y[-2]
+            x2 = x[-1]
+            y2 = y[-1]
+        # otherwise, the interpolant point is in the abscissa range and we need
+        # figure out which two points it falls between. if the point falls 
+        # right on top of one of the abscissas, then set that point as the 
+        # first point and the next abscissa as the second point 
+        else:
+            for j in range(n-1):
+                if x_int[i] >= x[j] and x_int[i] < x[j+1]:
+                    x1 = x[j]
+                    y1 = y[j]
+                    x2 = x[j+1]
+                    y2 = y[j+1]
+        
+
+        ## for each x_int, find the two closest x values
+        #distances = []
+        #for k in range(n):
+        #    distances.append(abs(x_int[i]-x[k]))
+        #sorted(distances)
+        #indices = [distances.index(entry) for entry in sorted(distances)]
+        #first_two_indices = indices[:2]
+        #i1 = min(first_two_indices)
+        #i2 = max(first_two_indices)
+        ## if this x_int happens to be exactly halfway between two x values
+        #if i1 == i2:
+        #    i2 = i1 + 1
+        ## find the corresponding x and y values
+        #x1 = x[i1]
+        #x2 = x[i2]
+        #y1 = y[i1]
+        #y2 = y[i2]
+     
         # use the y values corresponding to the two x values to interpolate
         y_int.append(y1 + (y2-y1)*(x_int[i]-x1)/(x2-x1))
-        
         # print progress to the screen, if requested
         if verbose:
             if i*100.0/n_int % 10 <= 0.1:
                 print('\tlinear interpolation: '+str(round(i*100.0/n_int,2))+'% done')
-            
     return (x_int, y_int)
     
 # this function extracts the period of steady-state oscillations ##############

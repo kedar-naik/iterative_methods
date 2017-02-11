@@ -17,8 +17,7 @@ from time_spectral import myLinspace, myNorm, linearInterp
 from iterative_methods import my_inv, my_pinv
 from dft_practice import my_dft
 
-# turn off interactive mode, so that plot windows don't pop up
-plt.ioff()
+
 
 #-----------------------------------------------------------------------------#
 def period_given_freqs(omegas):
@@ -190,6 +189,7 @@ def HB_forward_transform_matrix(omegas, time_discretization):
     # set the number of the time instances
     K = len(omegas)
     N = 2*K+1           # required for Fourier interpolation
+    '''
     # create a list of all N discrete frequencies
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
     w = [0]+omegas+[-omegas[-(i+1)] for i in range(K)]
@@ -199,8 +199,18 @@ def HB_forward_transform_matrix(omegas, time_discretization):
         for j in range(N):
             E_inv[i][j] = (1/N)*np.exp(1j*w[j]*t_HB[i])
     return E_inv
+    '''
+    # create a list of all 2*K+1 discrete frequencies, from -K to +K
+    # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K]
+    w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
+    # create the forward-transform matrix, G
+    G = np.zeros([N,N], dtype=np.complex_)
+    for i in range(N):
+        for j in range(N):
+            G[i][j] = np.exp(1j*w[j]*t_HB[i])
+    return G
 #-----------------------------------------------------------------------------#
-def harmonic_balance_operator(omegas, time_discretization='use_Nyquist'):
+def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pseudoinverse=False):
     '''
     given a discrete set of frequencies, compute the harmonic-balance 
     differential operator matrix
@@ -209,19 +219,32 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist'):
     from functools import reduce
     # set the location of the time instances
     t_HB = HB_time_instances(omegas, time_discretization)
+    '''    
     # create a list of all N discrete frequencies
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
     w = [0]+omegas+[-omegas[-(i+1)] for i in range(len(omegas))]
+    '''
+    # create a list of all 2*K+1 discrete frequencies, from -K to +K
+    # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K]
+    w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
     # create the diagonal matrix holding the frequencies
     w_imag = [1j*w_i for w_i in w]
-    C = np.diag(w_imag)
+    Omega = np.diag(w_imag)
     # construct the forward-tranform matrix
-    E_inv = HB_forward_transform_matrix(omegas, time_discretization)
-    # take the inverse of the matrix E
-    E = np.linalg.inv(E_inv)
-    # compute the operator (D_HB = E_inv*C*E)
-    # is always real...why?
-    D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [E_inv, C, E]))
+    G = HB_forward_transform_matrix(omegas, time_discretization)
+    # take the (pseudo)inverse and construct the operator
+    if use_pseudoinverse:
+        # take the inverse of the forward-transform matrix
+        G_plus = np.linalg.pinv(G)
+        # compute the operator (D_HB = G*Omega*G_plus)
+        # is always real...why?
+        D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [G, Omega, G_plus]))
+    else:        
+        # take the inverse of the forward-tranform matrix
+        G_inv = np.linalg.inv(G)
+        # compute the operator (D_HB = G*Omega*G_inv)
+        # is always real...why?
+        D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [G, Omega, G_inv]))
     # return the operator matrix and the time instances
     return (D_HB, t_HB)
 #-----------------------------------------------------------------------------#
@@ -379,23 +402,31 @@ def compute_cost(t_HB, f_HB, omegas, delta_t, actual_omegas):
 #-----------------------------------------------------------------------------#
 def HB_omega_check(omegas_given, make_plots=True):
     '''
+    only use this subroutine if the HB time instances are uniformly spaced and
+    just shy of spanning T1 (the period corresponding to the lowest frequency).
+    
     this subroutine reads in a list of K angular frequencies and tells the user
     whether the values given will lead to an ill-conditioned HB operator, with
     less than full rank, when the N time instances are uniformly spaced across
     the period corresponding to the lowest angular frequency.
+    
     if inadmissible frequencies are found, the user will be given a range (or 
     ranges) of feasible values that could be substituted in its place.
+
+    the function returns a bool, which is True if all given omegas are valid.
     '''
     import math
     from matplotlib import pyplot as plt
+    # initialize the boolean that will be returned
+    all_omegas_valid = True
     # total number of given angular frequencies
     K = len(omegas_given)
     # find the ccorresponding number of columns
-    N = 2*K + 1
+    N = 2*K+1
     # for notational simplicity later, note the first omega
     omega_1 = omegas_given[0]
     # initialize an empty list of to hold dictionaries for inadmissible frequency values
-    omegas = []
+    omega_dicts = []
     for i in range(K):          # i = 0,1,...,K-1
         # current omega
         omega_i = omegas_given[i]
@@ -472,45 +503,78 @@ def HB_omega_check(omegas_given, make_plots=True):
         inadmissible_points = [point_tuple for point_tuple in inadmissible_points if point_tuple[0] <= K_upper_bound]
         # sort the tuples created for inadmissible points by the actual values
         inadmissible_points = sorted(inadmissible_points, key=lambda point_tuple: point_tuple[0])
+        # check if the current omega value is at an inadmissible point
+        inadmissible_values = [point_tuple[0] for point_tuple in inadmissible_points]
+        omega_validity = True
+        for inadmissible_value in inadmissible_values:
+            if abs(inadmissible_value-omega_i) < 1e-6:
+                omega_validity = False
         # create a dictionary for this omega and fill in the known values
         omega_dict = {'value': omega_i,
-                      'valid': True,
+                      'valid': omega_validity,
                       'lower bound': lower_bound,
                       'upper bound': upper_bound,
                       'K upper bound': K_upper_bound,
                       'inadmissible points': inadmissible_points}
-        # append this dictionary to the list of omegas
-        omegas.append(omega_dict)
-    # if all the angular frequencies are valid, set a boolean equal to true
+        # append this dictionary to the list of omega dictionaries
+        omega_dicts.append(omega_dict)    
+    # if there are invalid omegas, print their dictionaries to the screen
     invalid_omegas = []
     omega_counter = 1
-    for omega in omegas:
-        if not omega['valid']:
-            invalid_omegas.append((omega_counter,omega['value']))
+    for omega_dict in omega_dicts:
+        if not omega_dict['valid']:
+            # set the boolean to return to False
+            all_omegas_valid = False
+            # print a header
+            print('\n\t- OMEGA #'+str(omega_counter)+ ' (' + \
+                  str(omega_dict['value']) + ' rad/sec)'+' IS INVALID:')
+            # print out the dictionary in a legible manner
+            for key in omega_dict:
+                print('\t      - '+(key+': ').ljust(15), end='')
+                if key == 'inadmissible points':
+                    row_names = ['value:  ', 'ratio:  ', 'rank(G):']
+                    for i in range(3):
+                        print('\n\t\t    '+row_names[i]+'\t', end='')
+                        for point in omega_dict[key]:
+                            print(str(round(point[i],3)).center(7), end='')
+                    print()
+                else:
+                    if not type(omega_dict[key]) == bool:
+                        print(str(round(omega_dict[key],3)))
+                    else:
+                        print(str(omega_dict[key]))
+        # increment the counter
         omega_counter += 1
+    # print a final warning
+    if not all_omegas_valid:
+        if len(invalid_omegas) == 1:
+            print('\n\t\t\t*** there is an inadmissible angular frequency! ***')
+        else:
+            print('\n\t\t\t*** there are inadmissible angular frequencies! ***')
+        print('\t\t\t***   (try using Nyquist-based discretization)  ***')
     # if desired, for each of the given angular frequencies, plot the  
     # inadmissible values and the corresponding degenerate rank
     if make_plots:
         for i in range(K):
             # extract the inadmissible points for this angular frequency
-            bad_points = [point_tuple[0] for point_tuple in omegas[i]['inadmissible points']]
+            bad_points = [point_tuple[0] for point_tuple in omega_dicts[i]['inadmissible points']]
             # extract the corresponding ranks
-            bad_ranks = [point_tuple[2] for point_tuple in omegas[i]['inadmissible points']]
+            bad_ranks = [point_tuple[2] for point_tuple in omega_dicts[i]['inadmissible points']]
             # initialize the boolean
             inadmissible_value = False
             # check to see if the current value is inadmissible (this is a boolean)
             if bad_points:
-                inadmissible_value = omegas[i]['value'] in bad_points
-                if inadmissible_value:
-                    bad_index = bad_points.index(omegas[i]['value'])
-                    bad_rank = bad_ranks[bad_index]
-            # set the validity flag in the dictionary
-            omegas[i]['valid'] = not inadmissible_value
+                index = 0
+                for point in bad_points:
+                    if abs(omega_dicts[i]['value']-point) < 1e-6:
+                        inadmissible_value = True
+                        bad_rank = bad_ranks[index]
+                    index += 1
             # extract upper and lower bounds and compute the range
-            lower_bound = omegas[i]['lower bound']
-            upper_bound = omegas[i]['upper bound']
+            lower_bound = omega_dicts[i]['lower bound']
+            upper_bound = omega_dicts[i]['upper bound']
             if upper_bound == math.inf:
-                upper_bound = omegas[i]['K upper bound']
+                upper_bound = omega_dicts[i]['K upper bound']
             admissible_range = upper_bound-lower_bound
             # full rank is N
             full_rank = N
@@ -532,15 +596,15 @@ def HB_omega_check(omegas_given, make_plots=True):
             # plot the given value with the corresponding rank
             if inadmissible_value:
                 # if the given value yields less than full rank
-                plt.plot(omegas[i]['value'], bad_rank, 'ro', label='$given \,\, value$')
-                plt.vlines(omegas[i]['value'], 0.0, bad_rank, 'r','--')
+                plt.plot(omega_dicts[i]['value'], bad_rank, 'ro', label='$given \,\, value$')
+                plt.vlines(omega_dicts[i]['value'], 0.0, bad_rank, 'r','--')
             else:
                 # if the given value is fine
-                plt.plot(omegas[i]['value'], full_rank, 'bo', label='$given \,\, value$')
-                plt.vlines(omegas[i]['value'], 0.0, full_rank, 'b','--')
+                plt.plot(omega_dicts[i]['value'], full_rank, 'bo', label='$given \,\, value$')
+                plt.vlines(omega_dicts[i]['value'], 0.0, full_rank, 'b','--')
             # plot labels, axes, title, legend
             plt.xlabel('$\omega_{'+str(i+1)+'}$', fontsize=16)
-            plt.ylabel('$rank ( F^{-1} ) $', fontsize=16)
+            plt.ylabel('$rank(G)$', fontsize=16)
             if bad_points:
                 # create a string with the inadmissible values
                 bad_points_string = ''
@@ -549,10 +613,10 @@ def HB_omega_check(omegas_given, make_plots=True):
                     if point != bad_points[-1]:
                         bad_points_string += ', '
                 # plot the title with inadmissible points
-                plt.title('$\omega_{'+str(i+1)+'} ='+str(omegas[i]['value'])+'\quad inadmissible \,\,points:\,\,'+bad_points_string+'$')
+                plt.title('$\omega_{'+str(i+1)+'} ='+str(omega_dicts[i]['value'])+'\quad inadmissible \,\,points:\,\,'+bad_points_string+'$')
             else:
                 # plot the title when there are no inadmissible points
-                plt.title('$\omega_{'+str(i+1)+'} ='+str(omegas[i]['value'])+'\quad (no \,\, inadmissible \,\, points \,\, within \,\, bounds)$')
+                plt.title('$\omega_{'+str(i+1)+'} ='+str(omega_dicts[i]['value'])+'\quad (no \,\, inadmissible \,\, points \,\, within \,\, bounds)$')
             plt.xlim(lower_bound-0.25*admissible_range, upper_bound+0.25*admissible_range)
             plt.ylim(0.0, 1.25*N)
             plt.legend(loc='best')
@@ -565,424 +629,8 @@ def HB_omega_check(omegas_given, make_plots=True):
             # open the saved image, if desired
             if auto_open:
                 webbrowser.open(file_name)
-    return omegas, invalid_omegas
+    return all_omegas_valid
 #-----------------------------------------------------------------------------#
-        
-###############
-# user inputs #
-###############
-
-# angular frequencies in the underlying signal
-actual_omegas = [1.5, 2.5]
-actual_omegas = [1.0, 2.1, 3.6]
-actual_omegas = [1.3, 2.1, 3.6, 4.7]
-
-# angular frequencies input by the user to the HB method
-omegas = copy.copy(actual_omegas)       # use the exact values
-
-# select the time discretization to use for specifying the of time instances
-time_discretization = 'use_Nyquist'
-time_discretization = 'use_T1'
-
-##############################################################
-# define the governing equation based on these actual omegas #
-##############################################################
-
-# instantiate an object of the governing equation
-the_ode = governing_ode(actual_omegas)
-
-##############################################################################
-# inadmissibiltiy check: are these omegas compatible with T1 discretization? #
-##############################################################################
-
-# omega_dicts contains all the constraints on each given angular frequency, 
-# invalid_omegas is a list of tuples containing the number and value of each 
-# inadmissible angular frequency
-omega_dicts, invalid_omegas = HB_omega_check(omegas)
-
-#######################################
-# actual periods of the two solutions #
-#######################################
-
-# compute and print the periods of the various signals
-T_HB_sol = period_given_freqs(omegas)
-T_actual_sol = period_given_freqs(actual_omegas)
-
-###########################################################################
-# [harmonic balance] Check to see if Harmonic Balance operator is working #
-###########################################################################
-
-# print message to the screen
-print('\nchecking the properties of the HB operator matrix...')
-
-# "exact" fine time grid to evaluate function
-T_lowest_omega = 2.0*np.pi/min(omegas)
-t_fine_points = 200
-t = np.linspace(0.0,T_lowest_omega, t_fine_points)
-# find the exact function and function derivative values at the time points
-f,df = my_non_periodic_fun(t, actual_omegas)
-
-# create the harmonic balance operator matrix
-print('\n( time_discretization = ', time_discretization,')')
-D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
-
-# plot the eigenvalues of the HB operator matrix
-plot_eigenvalues(D_HB, auto_open=False)
-
-# [HB] checking to see if we can find time derivatives
-f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-# multiply by the HB operator matrix 
-df_HB = np.dot(D_HB, f_HB)
-
-# plot everything
-plot_name = 'HB_operator_check'
-auto_open = False
-fourier_interp_HB = True
-plt.figure(plot_name)
-plt.plot(t, f, label='$f_{exact}$')
-plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
-plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
-if fourier_interp_HB:
-    plt.plot(t_HB, df_HB, 'go', label='$df/dt_{HB}$')
-    t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas,t)
-    plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
-else:
-    plt.plot(t_HB, df_HB, 'go--', label='$df/dt_{HB}$')
-    dummy = 1
-plt.xlabel('$t$', fontsize=16)
-plt.ylabel('$f(t)$', fontsize=16)
-#plt.ylim(-40,20)
-plt.legend(loc='best')
-#plt.legend(loc='lower right')
-plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
-#plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$', fontsize=16)
-
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
-    
-############################################################################
-# See how the error in the derivatives changes if the freqs used are wrong #
-############################################################################
-run_this_section = False            # do you want to run this analysis?
-# if desired, perform this study
-if run_this_section:
-    # set the error range to study
-    abs_percent_error = 75
-    # pick which measure of error to use ('f-difference' or 'distance')
-    error_measure = 'distance'
-    
-    # print message to the screen
-    print('\nstudying the effect of supplying incorrect frequencies...')
-    # initialize the set of percent errors to try 
-    percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
-    # instantiate list for plotting
-    max_norm_sol_error = 0
-    norm_sol_errors = []
-    # find the interpolated HB derivative with the correct angular frequencies
-    D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas, time_discretization)
-    f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-    df_HB = np.dot(D_HB, f_HB_actual)
-    t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
-    # loop through the various errors to try
-    for error_percentage in percent_errors:
-        # set the wrong angular frequencies
-        trial_omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
-        # find the interpolated HB derivative with the incorrect frequencies
-        D_HB, t_HB = harmonic_balance_operator(trial_omegas, time_discretization)
-        f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-        df_HB = np.dot(D_HB, f_HB)
-        t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
-        # compute error of incorrect solution, using values at interpolation points
-        if error_measure == 'f-difference':
-            # just just the error in df
-            sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
-        if error_measure == 'distance':
-            # compute distance on (t,df) plane    
-            sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
-        # find the l2-norm of the error
-        norm_sol_error = myNorm(sol_error)
-        norm_sol_errors.append(norm_sol_error)
-        # store the current omegas if they yield a higher error
-        if max_norm_sol_error < norm_sol_error:
-            max_norm_sol_error = norm_sol_error
-            max_error_omegas = trial_omegas
-            
-    # plot the norm of the solution errors
-    plot_name = 'supplying_incorrect_freqs'
-    auto_open = False
-    plt.figure(plot_name)
-    plt.plot(percent_errors, norm_sol_errors, 'k.-')
-    plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
-    if error_measure == 'f-difference':
-        plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
-    if error_measure == 'distance':
-        plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
-    plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
-    plt.tight_layout()
-    # save plot and close
-    print('\n\t'+'saving final image...', end='')
-    file_name = plot_name+'.png'
-    plt.savefig(file_name, dpi=300)
-    print('figure saved: '+plot_name)
-    plt.close(plot_name)
-    # open the saved image, if desired
-    if auto_open:
-        webbrowser.open(file_name)
-        
-    # find the interpolated HB derivative with the most incorrect frequencies
-    max_omegas = max_error_omegas
-    D_HB, t_HB = harmonic_balance_operator(max_omegas, time_discretization)
-    f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
-    df_HB_wrong = np.dot(D_HB, f_HB)
-    t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
-    
-    # plot the correct derivative and the worst answer studied
-    plot_name = 'result_at_worst_answer'
-    auto_open = False
-    plt.figure(plot_name)
-    plt.plot(t, f, label='$f_{exact}$')
-    plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
-    plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
-    plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
-    t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
-    plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
-    plt.xlabel('$t$', fontsize=16)
-    plt.ylabel('$f(t)$', fontsize=16)
-    plt.legend(loc='best')
-    plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
-    # save plot and close
-    print('\n\t'+'saving final image...', end='')
-    file_name = plot_name+'.png'
-    plt.savefig(file_name, dpi=300)
-    print('figure saved: '+plot_name)
-    plt.close(plot_name)
-    # open the saved image, if desired
-    if auto_open:
-        webbrowser.open(file_name)
-    
-#############################################################################
-# See how cond(D_HB) and cond(E_inv) vary with selected angular frequencies #
-#############################################################################
-first_omega = omegas[0]
-starting_multiple = first_omega
-penultimate_omega = omegas[-2]
-penultimate_multiple = penultimate_omega/first_omega
-nondim_penultimate_omega = 2.0*(penultimate_omega-first_omega)/(penultimate_omega+first_omega)
-max_multiple = 25.0
-multiples = myLinspace(starting_multiple, max_multiple, 50*int(max_multiple-starting_multiple)+1)
-plot_nondim_omegas = False
-
-# print message to the screen
-print('\nstudying the effect of different frequencies pairs on cond(D_HB) and cond(E_inv)...')
-D_conds = []
-E_inv_conds = []
-average_errors = []
-nondim_omegas = []
-for multiple in multiples:
-    # omegas
-    final_omega = first_omega*multiple
-    freqs = [first_omega]+omegas[1:-1]+[final_omega]
-    nondim_omegas.append(2.0*(final_omega-first_omega)/(final_omega+first_omega))
-    # operator    
-    D_HB, t_HB = harmonic_balance_operator(freqs, time_discretization)
-    current_D_cond = np.linalg.cond(D_HB)
-    D_conds.append(current_D_cond)
-    # E inverse
-    E_inv = HB_forward_transform_matrix(freqs, time_discretization)
-    current_E_inv_cond = np.linalg.cond(E_inv)
-    E_inv_conds.append(current_E_inv_cond)
-    # create a model function using the current pair of freqs and sample this
-    # function at the HB time instances
-    f_HB, df_exact = my_non_periodic_fun(t_HB, freqs)
-    # find the HB derivative
-    df_HB = np.dot(D_HB, f_HB)
-    # average of the percent errors between the exact derivatives and df_HB
-    percent_errors_df = [100.0*(abs(df_HB[i]-df_exact[i]))/abs(df_exact[i]) for i in range(len(f_HB))]
-    ave_percent_errors_df = sum(percent_errors_df)/len(percent_errors_df)
-    average_errors.append(ave_percent_errors_df)
-    #print('multiple: '+str(multiple)+'\tcond: '+str(current_cond))
-# find the peaks in these results, defined as being larger than 
-D_stdevs_cutoff = 0.0001
-D_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
-D_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
-E_inv_cutoff = 1e12
-E_inv_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
-E_inv_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
-df_percent_tol = 1e-5
-df_error_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
-df_error_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
-
-# plot the D_HB result
-plot_name = 'cond(D_HB)_vs_freq_ratio'
-auto_open = False
-plt.figure(plot_name)
-if plot_nondim_omegas:
-    plt.semilogy(nondim_omegas, D_conds, 'k.-')
-    plt.semilogy([nondim_penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
-    plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
-    plt.title('$outliers \,\, at: \,\, '+str(D_nondim_peaks)[1:-1]+'$', fontsize=8)
-else:
-    plt.semilogy(multiples, D_conds, 'k.-')
-    plt.semilogy([penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
-    plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-    plt.title('$outliers \,\, at: \,\, '+str(D_peaks)[1:-1]+'$', fontsize=8)
-plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
-#plt.tight_layout()
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
-    
-# plot the E_inv result
-plot_name = 'cond(E_inv)_vs_freq_ratio'
-auto_open = False
-plt.figure(plot_name)
-if plot_nondim_omegas:
-    plt.semilogy(nondim_omegas, E_inv_conds, 'k.-')
-    plt.semilogy([nondim_penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
-    plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
-    #plt.title('$outliers \,\, at: \,\, '+str(E_inv_nondim_peaks)[1:-1]+'$', fontsize=6)
-    plt.ylim(1,100)
-else:
-    plt.semilogy(multiples, E_inv_conds, 'k.-')
-    plt.semilogy([penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
-    plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-    plt.title('$outliers \,\, at: \,\, '+str(E_inv_peaks)[1:-1]+'$', fontsize=6)
-plt.ylabel('$\kappa(F^{-1})$', fontsize=14)
-#plt.tight_layout()
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
-    
-# plot the df_HB percent-error result
-plot_name = 'df_HB_error_vs_freq_ratio'
-auto_open = False
-plt.figure(plot_name)
-if plot_nondim_omegas:
-    plt.semilogy(nondim_omegas, average_errors, 'k.-')
-    plt.semilogy([nondim_penultimate_omega]*2,[min(average_errors),max(average_errors)],'y--')
-    plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
-    plt.title('$outliers \,\, at: \,\, '+str(df_error_nondim_peaks)[1:-1]+'$', fontsize=7)
-    plt.semilogy(nondim_omegas,[df_percent_tol]*len(nondim_omegas),'r--')
-else:
-    plt.semilogy(multiples, average_errors, 'k.-')
-    plt.semilogy([penultimate_omega]*2,[min(average_errors),max(average_errors)],'y--')
-    plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-    plt.title('$outliers \,\, at: \,\, '+str(df_error_peaks)[1:-1]+'$', fontsize=7)
-    plt.semilogy(multiples,[df_percent_tol]*len(multiples),'r--')
-plt.ylabel('$\% \,\, error \,\, in \,\, f_{,t_{HB}}$', fontsize=14)
-plt.tight_layout()
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
-##########################################
-# [time accurate] explicit forward euler #
-##########################################
-delta_t = 0.05             # time step
-initial_value = 2.0        # intitial condition
-
-t_start = 0.0                           # initial time
-t_end = 1.2*period_given_freqs(omegas)  # approx. final time (stop at or just after)
-
-time_points = int(math.ceil((t_end-t_start)/delta_t)+1)
-
-# print message to the screen
-print('\ncomputing time-accurate solution...\n')
-
-# time stepping
-times = []
-f = []
-for n in range(time_points):
-    times.append(t_start+n*delta_t)
-    if n == 0:
-        # record the initial condition
-        f.append(initial_value)
-    else:
-        # explicitly step forward in time (give it the actual frequencies!)
-        f.append(f[n-1] + delta_t*the_ode.evaluate(times[n-1],f[n-1]))
-
-# plotting: USER INPUTS! do you want to animate the solution history or just
-# plot the final result? (True = animate, False = just print final result)
-animate_plot = False
-plot_name = 'time-accurate ODE (HB)'
-n_images = time_points          # total number of images computed
-skip_images = 25                # images to skip between animation frames
-auto_play = False                # automatically play the movie
-auto_open = False                # automatically open the final image
-
-# plotting: initializations
-fig = plt.figure()
-# plotting: things that will not be changing inside the loop
-plt.xlabel('$t$', fontsize=18)
-plt.ylabel('$f(t)$', fontsize=18)
-plt.xlim(0,t_end)
-vertical_padding = (max(f)-min(f))/4.0
-plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
-title = ''
-counter=1
-for omega in omegas:
-    title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
-    counter += 1
-plt.title(title+'$\Delta t = \,'+str(delta_t)+'$')
-# plotting: set the total number of frames
-if animate_plot == True:
-    # capture all frames (skipping, if necessary) and the final frame
-    all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
-else:
-    # no animation: just capture the last one
-    all_frames = [n_images-1]
-# plotting: capturing the movie
-writer = animation.writers['ffmpeg'](fps=15)
-with writer.saving(fig, plot_name+'.mp4', 300):
-    frame = 0
-    for n in all_frames:
-        plt.plot(times[:n+1],f[:n+1],'b-')
-        # progress monitor
-        percent_done = float(n)*100.0/(n_images-1)
-        print('\tcapturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
-               round(percent_done,2),'%')
-        writer.grab_frame()
-        frame += 1
-    writer.grab_frame()
-# plotting: save an image of the final frame
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=500)
-print('figure saved: '+plot_name+'\n')
-# free memory used for the plot
-plt.close(fig)
-# start playing the movie, if desired
-if animate_plot and auto_play:
-    webbrowser.open(plot_name+'.mp4')
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
-
-# create a function that runs an HB problem ----------------------------------#
 def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau, 
                      constant_init_guess, residual_convergence_criteria, 
                      make_plot=False, auto_open_plot=False, make_movie=False, 
@@ -1022,19 +670,10 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
     from matplotlib import pyplot as plt
     # if using the T1 time discretization, check to see if all the given 
     # angular frequencies are valid, if not, print a warning to the screen
-    omega_dicts, invalid_omegas = HB_omega_check(omegas, make_plots=False)
-    # if there are invalid frequencies, print them to the screen
-    if invalid_omegas:
-        if len(invalid_omegas) == 1:
-            print('\n\tthere is an inadmissible angular frequency!')
-        else:
-            print('\n\tthere are inadmissible angular frequencies!')
-        print('\tconsider using Nyquist-based discretization!')
-        for omega_tuple in invalid_omegas:
-            bad_omega_number = omega_tuple[0]
-            bad_omega_value = omega_tuple[1]
-            print('\n\t\t- omega #' + str(bad_omega_number) + ' (' + \
-                  str(bad_omega_value) + ' rad/sec) is inadmissible!')
+    if time_discretization == 'use_T1':
+        all_omegas_valid = HB_omega_check(omegas, make_plots=False)
+        if not all_omegas_valid:
+            print('\n\tWARNING: THERE ARE INADMISSIBLE OMEGAS!')
     # maximum number of pseudo-time steps to try (can be changed, if needed)
     max_pseudo_steps = 10000000
     # print message to the screen
@@ -1057,7 +696,8 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         
         # learning rate for gradient descent
         eta = 1e-6
-        # level of partial convergence to begin optimizing the omegas (value, 'almost full convergence')
+        # level of partial convergence at which to begin optimizing the omegas 
+        # (value, 'almost full convergence')
         partial_convergence_level = 1e-1
         partial_convergence_level = 'almost full convergence'
         # set where to start ('first instance', 'last instance', 'both ends')
@@ -1501,20 +1141,11 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 omegas = sorted(omegas)
                 # if using the T1 time discretization, check to see if these 
                 # angular frequencies are valid, if not, print a warning
-                omega_dicts, invalid_omegas = HB_omega_check(omegas, make_plots=False)
-                # if there are invalid frequencies, print them to the screen
-                if invalid_omegas:
-                    if len(invalid_omegas) == 1:
-                        print('\n\tthere is an inadmissible angular frequency!')
-                    else:
-                        print('\n\tthere are inadmissible angular frequencies!')
-                    print('\tconsider using Nyquist-based discretization!')
-                    for omega_tuple in invalid_omegas:
-                        bad_omega_number = omega_tuple[0]
-                        bad_omega_value = omega_tuple[1]
-                        print('\n\t\t- omega #' + str(bad_omega_number) + ' (' + \
-                              str(bad_omega_value) + ' rad/sec) is inadmissible!')
-                    break
+                if time_discretization == 'use_T1':
+                    all_omegas_valid = HB_omega_check(omegas, make_plots=False)
+                    # if there are invalid frequencies, end the simulation
+                    if not all_omegas_valid:
+                        break
             else:
                 # turn off the switch signifying that optimizing is happening
                 # (don't start optimizing until partial convergence is reached)
@@ -1820,353 +1451,784 @@ def HB_sol_plus_DFT(B, kappa, time_discretization, the_ode, HB_initial_guess,
     ave_f_HB = sum(f_HB)/len(f_HB)
     return n_peaks, peaks_found, peak_ranges, peak_boundaries, ave_f_HB
 #-----------------------------------------------------------------------------#
-########################################################
-# solve the equation using the harmonic-balance method #
-########################################################
-
-# set the value to use "full convergence," using machine zero
-machine_zero = sys.float_info.epsilon
-fully_converged = 1e3*machine_zero
-
-# call the function to solve the HB problem
-t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
-                            delta_tau=0.01, 
-                            constant_init_guess=10.0, 
-                            residual_convergence_criteria=fully_converged, 
-                            make_plot=True, auto_open_plot=False, 
-                            make_movie=False, auto_play_movie=False,
-                            optimize_omegas=False)
-                        
-# interpolate the harmonic-balance solution using the prescribed frequencies
-t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
-
-###############################################################################
-# recursive aliasing check. starting with a guess of the largest frequency in 
-# the signal, keep doubling the bandwidth (B) and the number of uniformly 
-# spaced, positive angular frequencies to use (kappa) (initally start with 20) 
-# until the number and location of the "refined" peaks in the DFT converge 
-# (within prescribed error bands)
-###############################################################################
-
-# [user input] intial guess for the largest tonal frequency 
-max_tone_guess = 9.5
-# initial number of uniformly spaced points to discretize the initial bandwidth
-initial_points_in_B = 25
-# set level of "partial convergence" for the trial problems
-partial_convergence = 1e-1
-# set the maximum number of bandwidth contractions to try
-max_contractions = 7
-# minimum percentage AC energy to be captured in the extracted peaks
-AC_energy_to_capture = 95
-# give a constant initial guess of for the HB solution
-HB_initial_guess = 10.0
-# time discretization for defining HB time instances ('use_T1', 'use_Nyquist')
-time_discretization = 'use_T1'
-
-# print message to the screen
-print('\nstarting aliasing protection process...\n')
-print('\n\t-----------------------')
-print('\n\t   inital bandwidth')
-print('\n\t-----------------------\n')
-# set the initial bandwidth to the guess for the largest tonal peak
-B = max_tone_guess
-# set the number and location of the initial set of frequencies to the desired
-# number of initial points rounded to the nearest power of two (to use with the 
-# Cooley and Tukey FFT algorithm)
-kappa = int(2.0**np.round(np.log2(initial_points_in_B)))
-# discretize B, partially solve HB problem, take the DFT, return peak details
-n_peaks, peaks_found, \
-peak_ranges, peak_boundaries, ave_f_HB = HB_sol_plus_DFT(B, kappa,
-                                                          time_discretization, 
-                                                          the_ode,
-                                                          HB_initial_guess, 
-                                                          partial_convergence,
-                                                          AC_energy_to_capture) 
-# extend the bandwidth until the extracted peaks have converged within bounds
-peaks_converged = False
-for i in range(max_contractions):
-    # print a header for this iteration
-    print('\n\t------------------------')
-    print('\n\tbandwidth contraction #'+str(i+1))
-    print('\n\t------------------------\n')
-    # reassign the number and locations of the peaks from the previous run
-    n_peaks_old = n_peaks
-    peak_ranges_old = copy.copy(peak_ranges)
-    # set the new bandwidth equal to the largest clustered peak's upper 
-    # boundary and now use about twice the number of points within this range
-    # (rounded to the nearest power of two...for use with the FFT algorithm)
-    max_peak_upper_bound = peak_boundaries[-1][-1]
-    B = max_peak_upper_bound
-    twice_scaled_kappa = 2.0*(max_peak_upper_bound/B)*kappa
-    kappa = int(2.0**np.round(np.log2(twice_scaled_kappa)))    
-    # discretize B, partially solve HB problem, take the DFT, return peak details
-    n_peaks, peaks_found, \
-    peak_ranges, peak_boundaries, ave_f_FB = HB_sol_plus_DFT(B, kappa, 
-                                                            time_discretization, 
-                                                            the_ode, 
-                                                            ave_f_HB,
-                                                            partial_convergence, 
-                                                            AC_energy_to_capture) 
-    # check to see if the same number of peaks have been found as the last run
-    if n_peaks == n_peaks_old:
-        # compare the new peak ranges with the old ones
-        for j in range(n_peaks):
-            # extract the bounds of the old range for this peak
-            lower_old = peak_ranges_old[j][0]
-            upper_old = peak_ranges_old[j][1]
-            # extract the bounds of the new range for this peak
-            lower_new = peak_ranges[j][0]
-            upper_new = peak_ranges[j][1]
-            # check to see if the ranges are overlapping
-            if lower_old <= upper_new and lower_new <= upper_old:
-                # if they are, then we've found a converged peak
-                peaks_converged = True
-            else:
-                # we've found a non-converged peak and need to extend again
-                peaks_converged = False
-                break    
-    # if we've found converged peaks, then stop extending the bandwidth
-    if peaks_converged:
-        print('\n\t----------------------')
-        print('\n\tconverged peaks found!')
-        print('\n\t----------------------\n')
-        break
-
-######################################################################
-# use gradient descent and time-marching to optimize the frequencies #
-######################################################################
-
-# use the converged peaks found from the bandwidth-contraction process
-omegas = peaks_found
-
-# FOR TESTING ONLY!!!
-omegas = copy.copy(actual_omegas)
-omegas[0] = 1.31
-omegas[0] = 1.6
-
-# "random" values
-#omegas = [2.4, 3.5, 4.6, 6.7]
-# "close enough" values
-#omegas = [1.4000, 2.0, 3.7, 4.7]
- 
-# record the initial guess for the angular frequencies
-initial_guess_omegas = copy.copy(omegas)
-# using these omegas as initial guesses, solve an HB problem while optimizing
-# the angular frequencies using time-accurate comparisons and gradient descent
-# N.B. when optimizing frequencies, the function returns three variables
-t_HB, f_HB, omegas = solve_HB_problem(omegas, time_discretization, the_ode, 
+def main():
+    '''
+    main function, executed when run as a standalone file
+    '''
+    # turn off interactive mode, so that plot windows don't pop up
+    plt.ioff()
+    ###############
+    # user inputs #
+    ###############
+    
+    # angular frequencies in the underlying signal
+    actual_omegas = [1.5, 2.5]
+    actual_omegas = [1.5, 3.75]             # 3.75 is inadmissible here!
+    #actual_omegas = [1.0, 2.1, 3.6]
+    actual_omegas = [1.0, 2.1, 3.5]         # 3.5 is inadmissible here!
+    actual_omegas = [1.3, 2.1, 3.6, 4.7]
+    actual_omegas = [1.3, 2.1, 3.6, 5.85]   # 5.85 is inadmissble here!
+    
+    # angular frequencies input by the user to the HB method
+    omegas = copy.copy(actual_omegas)       # use the exact values
+    
+    # select the time discretization to use for specifying the of time instances
+    time_discretization = 'use_Nyquist'
+    time_discretization = 'use_T1'
+    
+    ##############################################################
+    # define the governing equation based on these actual omegas #
+    ##############################################################
+    
+    # instantiate an object of the governing equation
+    the_ode = governing_ode(actual_omegas)
+    
+    ##############################################################################
+    # inadmissibiltiy check: are these omegas compatible with T1 discretization? #
+    ##############################################################################
+    if time_discretization == 'use_T1':
+        # omega_dicts contains all the constraints on each given angular 
+        # frequency, invalid_omegas is a list of tuples containing the number 
+        # and value of each inadmissible angular frequency
+        all_omegas_valid = HB_omega_check(omegas)
+        # if there's an invalid omega, print a warning
+        if not all_omegas_valid:
+            print('\n\t\t* uh oh! need to change the time discretization! *')
+    else:
+        # if you're not using T1 discretization
+        all_omegas_valid = True
+    
+    #######################################
+    # actual periods of the two solutions #
+    #######################################
+    
+    # compute and print the periods of the various signals
+    T_HB_sol = period_given_freqs(omegas)
+    T_actual_sol = period_given_freqs(actual_omegas)
+    
+    ###########################################################################
+    # [harmonic balance] Check to see if Harmonic Balance operator is working #
+    ###########################################################################
+    
+    # print message to the screen
+    print('\nchecking the properties of the HB operator matrix...')
+    
+    # "exact" fine time grid to evaluate function
+    T_lowest_omega = 2.0*np.pi/min(omegas)
+    t_fine_points = 200
+    t = np.linspace(0.0,T_lowest_omega, t_fine_points)
+    # find the exact function and function derivative values at the time points
+    f,df = my_non_periodic_fun(t, actual_omegas)
+    
+    # create the harmonic balance operator matrix
+    print('\n( time_discretization = ', time_discretization,')')
+    D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization, use_pseudoinverse=True)
+    
+    # plot the eigenvalues of the HB operator matrix
+    plot_eigenvalues(D_HB, auto_open=False)
+    
+    # [HB] checking to see if we can find time derivatives
+    f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+    # multiply by the HB operator matrix 
+    df_HB = np.dot(D_HB, f_HB)
+    
+    # plot everything
+    plot_name = 'HB_operator_check'
+    auto_open = False
+    fourier_interp_HB = all_omegas_valid
+    plt.figure(plot_name)
+    plt.plot(t, f, label='$f_{exact}$')
+    plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
+    plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
+    if fourier_interp_HB:
+        plt.plot(t_HB, df_HB, 'go', label='$df/dt_{HB}$')
+        t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas,t)
+        plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
+    else:
+        plt.plot(t_HB, df_HB, 'go--', label='$df/dt_{HB}$')
+        dummy = 1
+    plt.xlabel('$t$', fontsize=16)
+    plt.ylabel('$f(t)$', fontsize=16)
+    plt.legend(loc='best')
+    plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
+              '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    ############################################################################
+    # See how the error in the derivatives changes if the freqs used are wrong #
+    ############################################################################
+    run_this_section = False            # do you want to run this analysis?
+    # if desired, perform this study
+    if run_this_section:
+        # set the error range to study
+        abs_percent_error = 75
+        # pick which measure of error to use ('f-difference' or 'distance')
+        error_measure = 'distance'
+        
+        # print message to the screen
+        print('\nstudying the effect of supplying incorrect frequencies...')
+        # initialize the set of percent errors to try 
+        percent_errors = myLinspace(-abs_percent_error, abs_percent_error, 2*abs_percent_error+1)
+        # instantiate list for plotting
+        max_norm_sol_error = 0
+        norm_sol_errors = []
+        # find the interpolated HB derivative with the correct angular frequencies
+        D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas, time_discretization)
+        f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+        df_HB = np.dot(D_HB, f_HB_actual)
+        t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
+        # loop through the various errors to try
+        for error_percentage in percent_errors:
+            # set the wrong angular frequencies
+            trial_omegas = [(1.0+error_percentage/100)*omega for omega in actual_omegas]
+            # find the interpolated HB derivative with the incorrect frequencies
+            D_HB, t_HB = harmonic_balance_operator(trial_omegas, time_discretization)
+            f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+            df_HB = np.dot(D_HB, f_HB)
+            t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
+            # compute error of incorrect solution, using values at interpolation points
+            if error_measure == 'f-difference':
+                # just just the error in df
+                sol_error = [(df_HB_int_wrong[i]-df_HB_int_actual[i])/df_HB_int_actual[i] for i in range(len(df_HB_int_actual))]
+            if error_measure == 'distance':
+                # compute distance on (t,df) plane    
+                sol_error = [math.sqrt((df_HB_int_wrong[i]-df_HB_int_actual[i])**2 + (t_HB_int_wrong[i]-t_HB_int_actual[i])**2) for i in range(len(df_HB_int_actual))]
+            # find the l2-norm of the error
+            norm_sol_error = myNorm(sol_error)
+            norm_sol_errors.append(norm_sol_error)
+            # store the current omegas if they yield a higher error
+            if max_norm_sol_error < norm_sol_error:
+                max_norm_sol_error = norm_sol_error
+                max_error_omegas = trial_omegas
+                
+        # plot the norm of the solution errors
+        plot_name = 'supplying_incorrect_freqs'
+        auto_open = False
+        plt.figure(plot_name)
+        plt.plot(percent_errors, norm_sol_errors, 'k.-')
+        plt.xlabel('$\% \, error \; of \; each \; \omega_{i}$', fontsize=16)
+        if error_measure == 'f-difference':
+            plt.ylabel('$\|\\frac{\\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual}}{\\frac{\partial f}{\partial t}_{actual}}\|_2$', fontsize=26)
+        if error_measure == 'distance':
+            plt.ylabel('$\\left\Vert \sqrt{ \\left( \\frac{\partial f}{\partial t}_{wrong}-\\frac{\partial f}{\partial t}_{actual} \\right)^2 + \\left( t_{wrong}-t_{actual} \\right)^2}\\right\Vert_2$', fontsize=16)
+        plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\}$')
+        plt.tight_layout()
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+            
+        # find the interpolated HB derivative with the most incorrect frequencies
+        max_omegas = max_error_omegas
+        D_HB, t_HB = harmonic_balance_operator(max_omegas, time_discretization)
+        f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+        df_HB_wrong = np.dot(D_HB, f_HB)
+        t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
+        
+        # plot the correct derivative and the worst answer studied
+        plot_name = 'result_at_worst_answer'
+        auto_open = False
+        plt.figure(plot_name)
+        plt.plot(t, f, label='$f_{exact}$')
+        plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
+        plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
+        plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
+        t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
+        plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
+        plt.xlabel('$t$', fontsize=16)
+        plt.ylabel('$f(t)$', fontsize=16)
+        plt.legend(loc='best')
+        plt.title('$\omega_{actual} = \{'+str(actual_omegas)[1:-1]+'\} \quad\quad \omega_{used} = \{'+str(max_omegas)[1:-1]+'\}$', fontsize=16)
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+        
+    #############################################################################
+    # See how cond(D_HB) and cond(E_inv) vary with selected angular frequencies #
+    #############################################################################
+    first_omega = omegas[0]
+    starting_multiple = first_omega
+    penultimate_omega = omegas[-2]
+    penultimate_multiple = penultimate_omega/first_omega
+    nondim_penultimate_omega = 2.0*(penultimate_omega-first_omega)/(penultimate_omega+first_omega)
+    max_multiple = 25.0
+    multiples = myLinspace(starting_multiple, max_multiple, 50*int(max_multiple-starting_multiple)+1)
+    plot_nondim_omegas = False
+    
+    # print message to the screen
+    print('\nstudying the effect of different frequencies pairs on cond(D_HB) and cond(E_inv)...')
+    D_conds = []
+    E_inv_conds = []
+    average_errors = []
+    nondim_omegas = []
+    for multiple in multiples:
+        # omegas
+        final_omega = first_omega*multiple
+        freqs = [first_omega]+omegas[1:-1]+[final_omega]
+        nondim_omegas.append(2.0*(final_omega-first_omega)/(final_omega+first_omega))
+        # operator    
+        D_HB, t_HB = harmonic_balance_operator(freqs, time_discretization)
+        current_D_cond = np.linalg.cond(D_HB)
+        D_conds.append(current_D_cond)
+        # E inverse
+        E_inv = HB_forward_transform_matrix(freqs, time_discretization)
+        current_E_inv_cond = np.linalg.cond(E_inv)
+        E_inv_conds.append(current_E_inv_cond)
+        # create a model function using the current pair of freqs and sample this
+        # function at the HB time instances
+        f_HB, df_exact = my_non_periodic_fun(t_HB, freqs)
+        # find the HB derivative
+        df_HB = np.dot(D_HB, f_HB)
+        # average of the percent errors between the exact derivatives and df_HB
+        percent_errors_df = [100.0*(abs(df_HB[i]-df_exact[i]))/abs(df_exact[i]) for i in range(len(f_HB))]
+        ave_percent_errors_df = sum(percent_errors_df)/len(percent_errors_df)
+        average_errors.append(ave_percent_errors_df)
+        #print('multiple: '+str(multiple)+'\tcond: '+str(current_cond))
+    # find the peaks in these results, defined as being larger than 
+    D_stdevs_cutoff = 0.0001
+    D_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
+    D_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
+    E_inv_cutoff = 1e12
+    E_inv_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
+    E_inv_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
+    df_percent_tol = 1e-5
+    df_error_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
+    df_error_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
+    
+    # plot the D_HB result
+    plot_name = 'cond(D_HB)_vs_freq_ratio'
+    auto_open = False
+    plt.figure(plot_name)
+    if plot_nondim_omegas:
+        plt.semilogy(nondim_omegas, D_conds, 'k.-')
+        plt.semilogy([nondim_penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
+        plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
+        plt.title('$outliers \,\, at: \,\, '+str(D_nondim_peaks)[1:-1]+'$', fontsize=8)
+    else:
+        plt.semilogy(multiples, D_conds, 'k.-')
+        plt.semilogy([penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
+        plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
+        plt.title('$outliers \,\, at: \,\, '+str(D_peaks)[1:-1]+'$', fontsize=8)
+    plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
+    #plt.tight_layout()
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    # plot the E_inv result
+    plot_name = 'cond(E_inv)_vs_freq_ratio'
+    auto_open = False
+    plt.figure(plot_name)
+    if plot_nondim_omegas:
+        plt.semilogy(nondim_omegas, E_inv_conds, 'k.-')
+        plt.semilogy([nondim_penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
+        plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
+        #plt.title('$outliers \,\, at: \,\, '+str(E_inv_nondim_peaks)[1:-1]+'$', fontsize=6)
+        plt.ylim(1,100)
+    else:
+        plt.semilogy(multiples, E_inv_conds, 'k.-')
+        plt.semilogy([penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
+        plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
+        plt.title('$outliers \,\, at: \,\, '+str(E_inv_peaks)[1:-1]+'$', fontsize=6)
+    plt.ylabel('$\kappa(F^{-1})$', fontsize=14)
+    #plt.tight_layout()
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    # plot the df_HB percent-error result
+    plot_name = 'df_HB_error_vs_freq_ratio'
+    auto_open = False
+    plt.figure(plot_name)
+    if plot_nondim_omegas:
+        plt.semilogy(nondim_omegas, average_errors, 'k.-')
+        plt.semilogy([nondim_penultimate_omega]*2,[min(average_errors),max(average_errors)],'y--')
+        plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
+        plt.title('$outliers \,\, at: \,\, '+str(df_error_nondim_peaks)[1:-1]+'$', fontsize=7)
+        plt.semilogy(nondim_omegas,[df_percent_tol]*len(nondim_omegas),'r--')
+    else:
+        plt.semilogy(multiples, average_errors, 'k.-')
+        plt.semilogy([penultimate_omega]*2,[min(average_errors),max(average_errors)],'y--')
+        plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
+        plt.title('$outliers \,\, at: \,\, '+str(df_error_peaks)[1:-1]+'$', fontsize=7)
+        plt.semilogy(multiples,[df_percent_tol]*len(multiples),'r--')
+    plt.ylabel('$\% \,\, error \,\, in \,\, f_{,t_{HB}}$', fontsize=14)
+    plt.tight_layout()
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    ##########################################
+    # [time accurate] explicit forward euler #
+    ##########################################
+    delta_t = 0.05             # time step
+    initial_value = 2.0        # intitial condition
+    
+    t_start = 0.0                           # initial time
+    t_end = 1.2*period_given_freqs(omegas)  # approx. final time (stop at or just after)
+    
+    time_points = int(math.ceil((t_end-t_start)/delta_t)+1)
+    
+    # print message to the screen
+    print('\ncomputing time-accurate solution...\n')
+    
+    # time stepping
+    times = []
+    f = []
+    for n in range(time_points):
+        times.append(t_start+n*delta_t)
+        if n == 0:
+            # record the initial condition
+            f.append(initial_value)
+        else:
+            # explicitly step forward in time (give it the actual frequencies!)
+            f.append(f[n-1] + delta_t*the_ode.evaluate(times[n-1],f[n-1]))
+    
+    # plotting: USER INPUTS! do you want to animate the solution history or just
+    # plot the final result? (True = animate, False = just print final result)
+    animate_plot = False
+    plot_name = 'time-accurate ODE (HB)'
+    n_images = time_points          # total number of images computed
+    skip_images = 25                # images to skip between animation frames
+    auto_play = False                # automatically play the movie
+    auto_open = False                # automatically open the final image
+    
+    # plotting: initializations
+    fig = plt.figure()
+    # plotting: things that will not be changing inside the loop
+    plt.xlabel('$t$', fontsize=18)
+    plt.ylabel('$f(t)$', fontsize=18)
+    plt.xlim(0,t_end)
+    vertical_padding = (max(f)-min(f))/4.0
+    plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
+    title = ''
+    counter=1
+    for omega in omegas:
+        title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
+        counter += 1
+    plt.title(title+'$\Delta t = \,'+str(delta_t)+'$')
+    # plotting: set the total number of frames
+    if animate_plot == True:
+        # capture all frames (skipping, if necessary) and the final frame
+        all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
+    else:
+        # no animation: just capture the last one
+        all_frames = [n_images-1]
+    # plotting: capturing the movie
+    writer = animation.writers['ffmpeg'](fps=15)
+    with writer.saving(fig, plot_name+'.mp4', 300):
+        frame = 0
+        for n in all_frames:
+            plt.plot(times[:n+1],f[:n+1],'b-')
+            # progress monitor
+            percent_done = float(n)*100.0/(n_images-1)
+            print('\tcapturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                   round(percent_done,2),'%')
+            writer.grab_frame()
+            frame += 1
+        writer.grab_frame()
+    # plotting: save an image of the final frame
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=500)
+    print('figure saved: '+plot_name+'\n')
+    # free memory used for the plot
+    plt.close(fig)
+    # start playing the movie, if desired
+    if animate_plot and auto_play:
+        webbrowser.open(plot_name+'.mp4')
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    ########################################################
+    # solve the equation using the harmonic-balance method #
+    ########################################################
+    
+    # set the value to use "full convergence," using machine zero
+    machine_zero = sys.float_info.epsilon
+    fully_converged = 1e3*machine_zero
+    
+    # call the function to solve the HB problem
+    t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
                                 delta_tau=0.01, 
                                 constant_init_guess=10.0, 
-                                residual_convergence_criteria=fully_converged,
-                                make_plot=True, auto_open_plot=True, 
-                                make_movie=True, auto_play_movie=False,
-                                optimize_omegas=True)
+                                residual_convergence_criteria=fully_converged, 
+                                make_plot=True, auto_open_plot=False, 
+                                make_movie=False, auto_play_movie=False,
+                                optimize_omegas=False)
+                            
+    # interpolate the harmonic-balance solution using the prescribed frequencies
+    t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
     
-# interpolate the harmonic-balance solution using the prescribed frequencies
-t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
-
-# compute the "long period" corresponding the final set of omegas
-T_HB_sol = period_given_freqs(omegas)
-# now, round the angular-frequencies (to a desired number of decimal points) 
-# and recompute the 
-desired_decimals = 1
-rounded_omegas = [float(round(omega,desired_decimals)) for omega in omegas]
-T_HB_sol_rounded = period_given_freqs(rounded_omegas)
-
-##########################################################
-# compare the harmonic-balance and time-accurate results #
-##########################################################
-
-# find the average value of the harmonic-balance solution
-f_ave_HB = np.average(f_HB_int)
-
-# starting from the end of the time-accurate simulation, figure out how many
-# time-accurate time steps are required to just traverse the "long" period of 
-# the actual solution. Interpolate that number of points of the time-accurate 
-# solution, starting from the end of the simulation onto a grid that has one
-# less point than the one being interpolated. the average of the time-accurate
-# solution is taken to be the average value of this interpolation.
-print('interpolating the TA solution to onto exactly one "long" period (for averaging)...\n')
-points_long_period = math.ceil(T_actual_sol/delta_t)+1
-t_last_long_period = myLinspace(t_end-T_actual_sol,t_end,points_long_period-1)
-t_last_long_period, f_last_long_period = linearInterp(times[-points_long_period:],f[-points_long_period:],t_last_long_period,verbose=True)
-f_ave_TA = sum(f_last_long_period)/(points_long_period-1)
-
-# interpolate the HB solution onto a grid that has same interval as TA solution
-print('\ninterpolating the HB solution onto a grid with the same interval as the TA solution...\n')
-span_HB = t_HB[-1]
-n_delta_t_per_span_HB = math.floor(span_HB/delta_t)
-span_HB_check = n_delta_t_per_span_HB*delta_t
-n_checkpoints = n_delta_t_per_span_HB+1
-t_HB_check = myLinspace(0.0, span_HB_check, n_checkpoints)
-t_HB_check,f_HB_check = linearInterp(t_HB_int, f_HB_int, t_HB_check, verbose=True)
-
-# figure out where along the "long" period of the time-accurate solution the 
-# harmonic-balance solution lies
-min_norm_diff = 1e6             # intitalized to a high value
-norm_diffs = []
-min_index = 0
-t_HB_int_min_shifted = []       # interpolated HB sol at the best minimum
-t_HB_min_shifted = []           # HB sol at the time instances at best minimum
-t_HB_int_trial_shifted = []     # "proving" (sliding) interpolated HB solution
-for i in range(-time_points,-n_checkpoints):
-    current_f_TA_range = f[i:i+n_checkpoints]
-    t_HB_int_current = [t+times[i] for t in t_HB_check]
-    diff = [abs(f_HB_check[j]-current_f_TA_range[j]) for j in range(n_checkpoints)]
-    norm_diff = myNorm(diff)
-    if norm_diff < min_norm_diff:
-        min_norm_diff = norm_diff
-        min_index = i
-        t_HB_int_min_current = t_HB_int_current
-        t_HB_min_current = [t+times[i] for t in t_HB]
-    norm_diffs.append(norm_diff)
-    t_HB_int_min_shifted.append(t_HB_int_min_current)
-    t_HB_min_shifted.append(t_HB_min_current)
-    t_HB_int_trial_shifted.append(t_HB_int_current)
-print('\ngenerating plot/animation of comparison process...\n')
-
-# plotting: USER INPUTS! do you want to animate the solution history or just
-# plot the final result? (True = animate, False = just print final result)
-animate_plot = False
-plot_name = 'sliding_comparison_HB_with_TA'
-n_images = len( t_HB_min_shifted)        # total number of images computed
-skip_images = 10                # images to skip between animation frames
-auto_play = False                # automatically play the movie
-auto_open = False                # automatically open the final image
-
-# plotting: initializations
-fig = plt.figure()
-# plotting: things that will not be changing inside the loop
-vertical_padding = (max(f)-min(f))/4.0
-title = ''
-counter=1
-for omega in rounded_omegas:
-    title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
-    counter += 1
-# plotting: set the total number of frames
-if animate_plot == True:
-    # capture all frames (skipping, if necessary) and the final frame
-    all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
-else:
-    # no animation: just capture the last one
-    all_frames = [n_images-1]
-# plotting: capturing the movie
-writer = animation.writers['ffmpeg'](fps=15)
-with writer.saving(fig, plot_name+'.mp4', 300):
-    frame = 0
-    for n in all_frames:
-        plt.cla()
-        plt.plot(times,f,'b-')
-        plt.plot(t_HB_min_shifted[n],f_HB,'go')
-        plt.plot(t_HB_int_min_shifted[n],f_HB_check,'g-')
-        if not n==n_images-1:
-            plt.plot(t_HB_int_trial_shifted[n],f_HB_check,'m-')
-        plt.title(title+'$\Delta t = '+str(delta_t)+'\quad min \, \\left\Vert f \minus f_{HB} \\right\Vert_2 = '+str(round(min(norm_diffs[:n+1]),2))+'$')
-        plt.xlabel('$t$', fontsize=18)
-        plt.ylabel('$f(t)$', fontsize=18)
-        plt.xlim(0,t_end)
-        plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
-        # progress monitor
-        percent_done = float(n)*100.0/(n_images-1)
-        print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
-               round(percent_done,2),'%')
+    ###############################################################################
+    # recursive aliasing check. starting with a guess of the largest frequency in 
+    # the signal, keep doubling the bandwidth (B) and the number of uniformly 
+    # spaced, positive angular frequencies to use (kappa) (initally start with 20) 
+    # until the number and location of the "refined" peaks in the DFT converge 
+    # (within prescribed error bands)
+    ###############################################################################
+    
+    # [user input] intial guess for the largest tonal frequency 
+    max_tone_guess = 9.5
+    # initial number of uniformly spaced points to discretize the initial bandwidth
+    initial_points_in_B = 25
+    # set level of "partial convergence" for the trial problems
+    partial_convergence = 1e-1
+    # set the maximum number of bandwidth contractions to try
+    max_contractions = 7
+    # minimum percentage AC energy to be captured in the extracted peaks
+    AC_energy_to_capture = 95
+    # give a constant initial guess of for the HB solution
+    HB_initial_guess = 10.0
+    # time discretization for defining HB time instances ('use_T1', 'use_Nyquist')
+    time_discretization = 'use_T1'
+    
+    # print message to the screen
+    print('\nstarting aliasing protection process...\n')
+    print('\n\t-----------------------')
+    print('\n\t   inital bandwidth')
+    print('\n\t-----------------------\n')
+    # set the initial bandwidth to the guess for the largest tonal peak
+    B = max_tone_guess
+    # set the number and location of the initial set of frequencies to the desired
+    # number of initial points rounded to the nearest power of two (to use with the 
+    # Cooley and Tukey FFT algorithm)
+    kappa = int(2.0**np.round(np.log2(initial_points_in_B)))
+    # discretize B, partially solve HB problem, take the DFT, return peak details
+    n_peaks, peaks_found, \
+    peak_ranges, peak_boundaries, ave_f_HB = HB_sol_plus_DFT(B, kappa,
+                                                              time_discretization, 
+                                                              the_ode,
+                                                              HB_initial_guess, 
+                                                              partial_convergence,
+                                                              AC_energy_to_capture) 
+    # extend the bandwidth until the extracted peaks have converged within bounds
+    peaks_converged = False
+    for i in range(max_contractions):
+        # print a header for this iteration
+        print('\n\t------------------------')
+        print('\n\tbandwidth contraction #'+str(i+1))
+        print('\n\t------------------------\n')
+        # reassign the number and locations of the peaks from the previous run
+        n_peaks_old = n_peaks
+        peak_ranges_old = copy.copy(peak_ranges)
+        # set the new bandwidth equal to the largest clustered peak's upper 
+        # boundary and now use about twice the number of points within this range
+        # (rounded to the nearest power of two...for use with the FFT algorithm)
+        max_peak_upper_bound = peak_boundaries[-1][-1]
+        B = max_peak_upper_bound
+        twice_scaled_kappa = 2.0*(max_peak_upper_bound/B)*kappa
+        kappa = int(2.0**np.round(np.log2(twice_scaled_kappa)))    
+        # discretize B, partially solve HB problem, take the DFT, return peak details
+        n_peaks, peaks_found, \
+        peak_ranges, peak_boundaries, ave_f_FB = HB_sol_plus_DFT(B, kappa, 
+                                                                time_discretization, 
+                                                                the_ode, 
+                                                                ave_f_HB,
+                                                                partial_convergence, 
+                                                                AC_energy_to_capture) 
+        # check to see if the same number of peaks have been found as the last run
+        if n_peaks == n_peaks_old:
+            # compare the new peak ranges with the old ones
+            for j in range(n_peaks):
+                # extract the bounds of the old range for this peak
+                lower_old = peak_ranges_old[j][0]
+                upper_old = peak_ranges_old[j][1]
+                # extract the bounds of the new range for this peak
+                lower_new = peak_ranges[j][0]
+                upper_new = peak_ranges[j][1]
+                # check to see if the ranges are overlapping
+                if lower_old <= upper_new and lower_new <= upper_old:
+                    # if they are, then we've found a converged peak
+                    peaks_converged = True
+                else:
+                    # we've found a non-converged peak and need to extend again
+                    peaks_converged = False
+                    break    
+        # if we've found converged peaks, then stop extending the bandwidth
+        if peaks_converged:
+            print('\n\t----------------------')
+            print('\n\tconverged peaks found!')
+            print('\n\t----------------------\n')
+            break
+    
+    ######################################################################
+    # use gradient descent and time-marching to optimize the frequencies #
+    ######################################################################
+    
+    # use the converged peaks found from the bandwidth-contraction process
+    omegas = peaks_found
+    
+    # FOR TESTING ONLY!!!
+    omegas = copy.copy(actual_omegas)
+    omegas[0] = 1.31
+    omegas[0] = 1.6
+    
+    # "random" values
+    #omegas = [2.4, 3.5, 4.6, 6.7]
+    # "close enough" values
+    #omegas = [1.4000, 2.0, 3.7, 4.7]
+     
+    # record the initial guess for the angular frequencies
+    initial_guess_omegas = copy.copy(omegas)
+    # using these omegas as initial guesses, solve an HB problem while optimizing
+    # the angular frequencies using time-accurate comparisons and gradient descent
+    # N.B. when optimizing frequencies, the function returns three variables
+    t_HB, f_HB, omegas = solve_HB_problem(omegas, time_discretization, the_ode, 
+                                    delta_tau=0.01, 
+                                    constant_init_guess=10.0, 
+                                    residual_convergence_criteria=fully_converged,
+                                    make_plot=True, auto_open_plot=True, 
+                                    make_movie=True, auto_play_movie=False,
+                                    optimize_omegas=True)
+        
+    # interpolate the harmonic-balance solution using the prescribed frequencies
+    t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
+    
+    # compute the "long period" corresponding the final set of omegas
+    T_HB_sol = period_given_freqs(omegas)
+    # now, round the angular-frequencies (to a desired number of decimal points) 
+    # and recompute the 
+    desired_decimals = 1
+    rounded_omegas = [float(round(omega,desired_decimals)) for omega in omegas]
+    T_HB_sol_rounded = period_given_freqs(rounded_omegas)
+    
+    ##########################################################
+    # compare the harmonic-balance and time-accurate results #
+    ##########################################################
+    
+    # find the average value of the harmonic-balance solution
+    f_ave_HB = np.average(f_HB_int)
+    
+    # starting from the end of the time-accurate simulation, figure out how many
+    # time-accurate time steps are required to just traverse the "long" period of 
+    # the actual solution. Interpolate that number of points of the time-accurate 
+    # solution, starting from the end of the simulation onto a grid that has one
+    # less point than the one being interpolated. the average of the time-accurate
+    # solution is taken to be the average value of this interpolation.
+    print('interpolating the TA solution to onto exactly one "long" period (for averaging)...\n')
+    points_long_period = math.ceil(T_actual_sol/delta_t)+1
+    t_last_long_period = myLinspace(t_end-T_actual_sol,t_end,points_long_period-1)
+    t_last_long_period, f_last_long_period = linearInterp(times[-points_long_period:],f[-points_long_period:],t_last_long_period,verbose=True)
+    f_ave_TA = sum(f_last_long_period)/(points_long_period-1)
+    
+    # interpolate the HB solution onto a grid that has same interval as TA solution
+    print('\ninterpolating the HB solution onto a grid with the same interval as the TA solution...\n')
+    span_HB = t_HB[-1]
+    n_delta_t_per_span_HB = math.floor(span_HB/delta_t)
+    span_HB_check = n_delta_t_per_span_HB*delta_t
+    n_checkpoints = n_delta_t_per_span_HB+1
+    t_HB_check = myLinspace(0.0, span_HB_check, n_checkpoints)
+    t_HB_check,f_HB_check = linearInterp(t_HB_int, f_HB_int, t_HB_check, verbose=True)
+    
+    # figure out where along the "long" period of the time-accurate solution the 
+    # harmonic-balance solution lies
+    min_norm_diff = 1e6             # intitalized to a high value
+    norm_diffs = []
+    min_index = 0
+    t_HB_int_min_shifted = []       # interpolated HB sol at the best minimum
+    t_HB_min_shifted = []           # HB sol at the time instances at best minimum
+    t_HB_int_trial_shifted = []     # "proving" (sliding) interpolated HB solution
+    for i in range(-time_points,-n_checkpoints):
+        current_f_TA_range = f[i:i+n_checkpoints]
+        t_HB_int_current = [t+times[i] for t in t_HB_check]
+        diff = [abs(f_HB_check[j]-current_f_TA_range[j]) for j in range(n_checkpoints)]
+        norm_diff = myNorm(diff)
+        if norm_diff < min_norm_diff:
+            min_norm_diff = norm_diff
+            min_index = i
+            t_HB_int_min_current = t_HB_int_current
+            t_HB_min_current = [t+times[i] for t in t_HB]
+        norm_diffs.append(norm_diff)
+        t_HB_int_min_shifted.append(t_HB_int_min_current)
+        t_HB_min_shifted.append(t_HB_min_current)
+        t_HB_int_trial_shifted.append(t_HB_int_current)
+    print('\ngenerating plot/animation of comparison process...\n')
+    
+    # plotting: USER INPUTS! do you want to animate the solution history or just
+    # plot the final result? (True = animate, False = just print final result)
+    animate_plot = False
+    plot_name = 'sliding_comparison_HB_with_TA'
+    n_images = len( t_HB_min_shifted)        # total number of images computed
+    skip_images = 10                # images to skip between animation frames
+    auto_play = False                # automatically play the movie
+    auto_open = False                # automatically open the final image
+    
+    # plotting: initializations
+    fig = plt.figure()
+    # plotting: things that will not be changing inside the loop
+    vertical_padding = (max(f)-min(f))/4.0
+    title = ''
+    counter=1
+    for omega in rounded_omegas:
+        title = title + '$\omega_{'+str(counter)+'} ='+str(omega)+'\quad $'
+        counter += 1
+    # plotting: set the total number of frames
+    if animate_plot == True:
+        # capture all frames (skipping, if necessary) and the final frame
+        all_frames = list(range(0,n_images,skip_images+1))+[n_images-1]
+    else:
+        # no animation: just capture the last one
+        all_frames = [n_images-1]
+    # plotting: capturing the movie
+    writer = animation.writers['ffmpeg'](fps=15)
+    with writer.saving(fig, plot_name+'.mp4', 300):
+        frame = 0
+        for n in all_frames:
+            plt.cla()
+            plt.plot(times,f,'b-')
+            plt.plot(t_HB_min_shifted[n],f_HB,'go')
+            plt.plot(t_HB_int_min_shifted[n],f_HB_check,'g-')
+            if not n==n_images-1:
+                plt.plot(t_HB_int_trial_shifted[n],f_HB_check,'m-')
+            plt.title(title+'$\Delta t = '+str(delta_t)+'\quad min \, \\left\Vert f \minus f_{HB} \\right\Vert_2 = '+str(round(min(norm_diffs[:n+1]),2))+'$')
+            plt.xlabel('$t$', fontsize=18)
+            plt.ylabel('$f(t)$', fontsize=18)
+            plt.xlim(0,t_end)
+            plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
+            # progress monitor
+            percent_done = float(n)*100.0/(n_images-1)
+            print('capturing fig. '+plot_name+' (frame #'+str(frame)+'): ', \
+                   round(percent_done,2),'%')
+            writer.grab_frame()
+            frame += 1
         writer.grab_frame()
-        frame += 1
-    writer.grab_frame()
-# plotting: save an image of the final frame
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=500)
-print('figure saved: '+plot_name+'\n')
-# free memory used for the plot
-plt.close(fig)
-# start playing the movie, if desired
-if animate_plot and auto_play:
-    webbrowser.open(plot_name+'.mp4')
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
+    # plotting: save an image of the final frame
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=500)
+    print('figure saved: '+plot_name+'\n')
+    # free memory used for the plot
+    plt.close(fig)
+    # start playing the movie, if desired
+    if animate_plot and auto_play:
+        webbrowser.open(plot_name+'.mp4')
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    # plot a close up of the HB solution and the time-accurate portion it matches
+    print('generating close-up plot of the comparison...')
+    # plotting preliminaries
+    plot_name = 'comparison_HB_with_TA'
+    auto_open = False
+    plt.figure(plot_name)
+    # plot the two curves
+    plt.plot(t_HB_min_shifted[-1],f_HB,'go')
+    plt.plot(t_HB_int_min_shifted[-1],f_HB_check,'g-', label='$harmonic \,\, balance$')
+    plt.plot(times[min_index:min_index+n_checkpoints+1], f[min_index:min_index+n_checkpoints+1],'b-',label='$time \,\, accurate$')
+    # plot labels, axes, title, legend
+    plt.xlabel('$t$', fontsize=18)
+    plt.ylabel('$f(t)$', fontsize=18)
+    plt.xlim(t_HB_min_shifted[-1][0],t_HB_min_shifted[-1][0]+span_HB_check)
+    #plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
+    plt.legend(loc='best')
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    ################################################
+    # print all intermediate results to the screen #
+    ################################################
+    
+    # actual periods of the HB solution and the actual ODE solution
+    print('\n------------------------------------------------------------------\n')
+    print('\n-true periods of solutions, based on given angular frequencies:')
+    print('\n\t(n.b. these values are not unique! different combinations of ')
+    print('\tangular frequencies can yield the same "long" period)')
+    print('\n\tperiod of the HB solution, based on omegas used:', round(T_HB_sol,3))
+    print('\n\t( period of HB solution, based on rounded omegas:', round(T_HB_sol_rounded,3),')')
+    print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
+    
+    # print information about the angular frequencies
+    print('\n-a look at the angular frequencies:')
+    print('\n\t-initial guess [rad/s]:')
+    print('\n\t\t'+str(initial_guess_omegas))
+    print('\n\t-values used [rad/s]:')
+    print('\n\t\t'+str(omegas))
+    print('\n\t-values used (rounded) [rad/s]:')
+    print('\n\t\t'+str(rounded_omegas))
+    print('\n\t-actual values [rad/s]:')
+    print('\n\t\t'+str(actual_omegas))
+    
+    # print information about the HB operator
+    print('\n\n-a look at the HB operator:')
+    print('\n\tK = '+str(len(omegas)))
+    N = 2*len(omegas)+1
+    print('\n\tN = '+str(N))
+    print('\n\tD_HB = ', str(np.around(D_HB,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
+    print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
+    print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
+    print('\trank(D_HB) = ',np.linalg.matrix_rank(D_HB),'\n')
+    E_inv = HB_forward_transform_matrix(omegas, time_discretization)
+    N_E_inv = [[0]*N for i in range(N)]
+    N_E_inv = np.zeros((N,N),dtype=np.complex_)
+    for i in range(N):
+        for j in range(N):
+            N_E_inv[i][j] = np.round(N*E_inv[i][j],2)
+    stringed_E_inv = []
+    for i in range(N):
+        realed_row = [np.real_if_close(N_E_inv[i][j],1000) for j in range(N)]        
+        stringed_row = ''.join([char for char in str(realed_row) if char not in 'array()'])
+        stringed_E_inv.append(stringed_row)
+    print('\n\tE_inv = (1/'+str(N)+')'+str(stringed_E_inv)[2:-2].replace("', '",'\n\t'+' '*13).replace(', ','\t'))
+    print('\n\trank(E_inv) = ',np.linalg.matrix_rank(E_inv))
+    
+    # print both TA and HB average function values to the screen
+    print('\n-comparing the average value of the time-accurate solution (over \n'
+           +' one steady-state "long" period corresponding to the actual \n'
+           +' frequencies) to the average value of the harmonic-balance solution \n'
+           +' (over the '+str(N)+' time instances):')
+    print('\n\tf_ave (time-accurate) = '+str(round(f_ave_TA,3)))
+    print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3)))
+    print()
 
-# plot a close up of the HB solution and the time-accurate portion it matches
-print('generating close-up plot of the comparison...')
-# plotting preliminaries
-plot_name = 'comparison_HB_with_TA'
-auto_open = False
-plt.figure(plot_name)
-# plot the two curves
-plt.plot(t_HB_min_shifted[-1],f_HB,'go')
-plt.plot(t_HB_int_min_shifted[-1],f_HB_check,'g-', label='$harmonic \,\, balance$')
-plt.plot(times[min_index:min_index+n_checkpoints+1], f[min_index:min_index+n_checkpoints+1],'b-',label='$time \,\, accurate$')
-# plot labels, axes, title, legend
-plt.xlabel('$t$', fontsize=18)
-plt.ylabel('$f(t)$', fontsize=18)
-plt.xlim(t_HB_min_shifted[-1][0],t_HB_min_shifted[-1][0]+span_HB_check)
-#plt.ylim(min(f)-vertical_padding,max(f)+vertical_padding)
-plt.legend(loc='best')
-# save plot and close
-print('\n\t'+'saving final image...', end='')
-file_name = plot_name+'.png'
-plt.savefig(file_name, dpi=300)
-print('figure saved: '+plot_name)
-plt.close(plot_name)
-# open the saved image, if desired
-if auto_open:
-    webbrowser.open(file_name)
+#-----------------------------------------------------------------------------#
 
-################################################
-# print all intermediate results to the screen #
-################################################
-
-# actual periods of the HB solution and the actual ODE solution
-print('\n------------------------------------------------------------------\n')
-print('\n-true periods of solutions, based on given angular frequencies:')
-print('\n\t(n.b. these values are not unique! different combinations of ')
-print('\tangular frequencies can yield the same "long" period)')
-print('\n\tperiod of the HB solution, based on omegas used:', round(T_HB_sol,3))
-print('\n\t( period of HB solution, based on rounded omegas:', round(T_HB_sol_rounded,3),')')
-print('\n\tperiod of the ODE solution:', round(T_actual_sol,3),'\n')
-
-# print information about the angular frequencies
-print('\n-a look at the angular frequencies:')
-print('\n\t-initial guess [rad/s]:')
-print('\n\t\t'+str(initial_guess_omegas))
-print('\n\t-values used [rad/s]:')
-print('\n\t\t'+str(omegas))
-print('\n\t-values used (rounded) [rad/s]:')
-print('\n\t\t'+str(rounded_omegas))
-print('\n\t-actual values [rad/s]:')
-print('\n\t\t'+str(actual_omegas))
-
-# print information about the HB operator
-print('\n\n-a look at the HB operator:')
-print('\n\tK = '+str(len(omegas)))
-N = 2*len(omegas)+1
-print('\n\tN = '+str(N))
-print('\n\tD_HB = ', str(np.around(D_HB,3))[1:-1].replace('\n','\n\t'+' '*7),'\n')
-print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
-print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
-print('\trank(D_HB) = ',np.linalg.matrix_rank(D_HB),'\n')
-E_inv = HB_forward_transform_matrix(omegas, time_discretization)
-N_E_inv = [[0]*N for i in range(N)]
-N_E_inv = np.zeros((N,N),dtype=np.complex_)
-for i in range(N):
-    for j in range(N):
-        N_E_inv[i][j] = np.round(N*E_inv[i][j],2)
-stringed_E_inv = []
-for i in range(N):
-    realed_row = [np.real_if_close(N_E_inv[i][j],1000) for j in range(N)]        
-    stringed_row = ''.join([char for char in str(realed_row) if char not in 'array()'])
-    stringed_E_inv.append(stringed_row)
-print('\n\tE_inv = (1/'+str(N)+')'+str(stringed_E_inv)[2:-2].replace("', '",'\n\t'+' '*13).replace(', ','\t'))
-print('\n\trank(E_inv) = ',np.linalg.matrix_rank(E_inv))
-
-# print both TA and HB average function values to the screen
-print('\n-comparing the average value of the time-accurate solution (over \n'
-       +' one steady-state "long" period corresponding to the actual \n'
-       +' frequencies) to the average value of the harmonic-balance solution \n'
-       +' (over the '+str(N)+' time instances):')
-print('\n\tf_ave (time-accurate) = '+str(round(f_ave_TA,3)))
-print('\tf_ave (harmonic-balance) = '+str(round(f_ave_HB,3)))
-print()
-
-
+# standard boilerplate to call the main() function
+if __name__ == '__main__':
+    main()

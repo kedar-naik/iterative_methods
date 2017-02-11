@@ -432,6 +432,17 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                     # list, since the clustered peaks are already sorted in 
                     # ascending order
                     peak_bounds_tuples.append((folding_freq,folding_freq))
+                # consider also the similar special case where a given cluster
+                # has only one peak in it. if this is the case, then don't go
+                # through with the refinement procedure. set the refined-peak
+                # values and the refined boundaries accordingly
+                elif len(clusters[i]) == 1:
+                    the_single_peak = clusters[i][0]
+                    the_single_freq = the_single_peak[0]
+                    the_single_power = the_single_peak[1]
+                    refined_positive_freqs.append(the_single_freq)
+                    refined_COMs_y.append(the_single_power)
+                    peak_bounds_tuples.append((the_single_freq, the_single_freq))
                 # if not dealing with special case, then start refinement
                 else:
                     # extract the upper and lower boundary of this peak's bin

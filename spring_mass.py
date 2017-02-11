@@ -26,7 +26,7 @@ t_0 = 0                     # intial time, [s]
 
 # time-step definition
 del_t = 0.0001              # time step, [s]
-t_end = 10                  # final time, [s]
+t_end = 10.0                  # final time, [s]
 
 # create a dictionary defining the problem
 my_spring_problem = {'m': m,           # mass, [kg]
