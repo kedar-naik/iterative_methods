@@ -176,10 +176,10 @@ def HB_time_instances(omegas, time_discretization='use_Nyquist'):
     t_HB = np.array([i*delta_t for i in range(N)])
     return t_HB
 #-----------------------------------------------------------------------------#
-def HB_forward_transform_matrix(omegas, time_discretization):
+def HB_expansion_matrix(omegas, time_discretization):
     '''
     given the discrete set of nonzero angular frequencies and the time
-    instances of interest, this subroutine returns the "E inverse" matrix that 
+    instances of interest, this subroutine returns the G matrix that 
     represents the forward discrete Fourier transform taken at the specific 
     frequencies
     '''
@@ -231,10 +231,11 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pse
     w_imag = [1j*w_i for w_i in w]
     Omega = np.diag(w_imag)
     # construct the forward-tranform matrix
-    G = HB_forward_transform_matrix(omegas, time_discretization)
+    G = HB_expansion_matrix(omegas, time_discretization)
     # take the (pseudo)inverse and construct the operator
     if use_pseudoinverse:
-        # take the inverse of the forward-transform matrix
+        # take the pseudoinverse of the forward-transform matrix
+        # n.b. numpy's pinv gives the left pseudoinverse, which is what we want
         G_plus = np.linalg.pinv(G)
         # compute the operator (D_HB = G*Omega*G_plus)
         # is always real...why?
@@ -1464,10 +1465,10 @@ def main():
     # angular frequencies in the underlying signal
     actual_omegas = [1.5, 2.5]
     actual_omegas = [1.5, 3.75]             # 3.75 is inadmissible here!
-    #actual_omegas = [1.0, 2.1, 3.6]
+    actual_omegas = [1.0, 2.1, 3.6]
     actual_omegas = [1.0, 2.1, 3.5]         # 3.5 is inadmissible here!
-    actual_omegas = [1.3, 2.1, 3.6, 4.7]
-    actual_omegas = [1.3, 2.1, 3.6, 5.85]   # 5.85 is inadmissble here!
+    #actual_omegas = [1.3, 2.1, 3.6, 4.7]
+    #actual_omegas = [1.3, 2.1, 3.6, 5.85]   # 5.85 is inadmissble here!
     
     # angular frequencies input by the user to the HB method
     omegas = copy.copy(actual_omegas)       # use the exact values
@@ -1527,10 +1528,10 @@ def main():
     # plot the eigenvalues of the HB operator matrix
     plot_eigenvalues(D_HB, auto_open=False)
     
-    # [HB] checking to see if we can find time derivatives
-    f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+    # again, pull out the exact function values at the time instances
+    f_at_t_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
     # multiply by the HB operator matrix 
-    df_HB = np.dot(D_HB, f_HB)
+    df_HB = np.dot(D_HB, f_at_t_HB)
     
     # plot everything
     plot_name = 'HB_operator_check'
@@ -1539,7 +1540,7 @@ def main():
     plt.figure(plot_name)
     plt.plot(t, f, label='$f_{exact}$')
     plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
-    plt.plot(t_HB, f_HB, 'ko', label='$f_{HB}$')
+    plt.plot(t_HB, f_at_t_HB, 'ko', label='$f_{HB}$')
     if fourier_interp_HB:
         plt.plot(t_HB, df_HB, 'go', label='$df/dt_{HB}$')
         t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas,t)
@@ -1561,7 +1562,161 @@ def main():
     # open the saved image, if desired
     if auto_open:
         webbrowser.open(file_name)
-        
+    
+    ###############################################
+    # check to see if the HB expansion is working #
+    ###############################################
+    
+    # again, pull out the exact function values at the time instances
+    f_at_t_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
+    # construct the the forward "transform" matrix
+    G = HB_expansion_matrix(omegas, time_discretization)
+    # compute the HB expansion coefficients
+    c = np.dot(np.linalg.inv(G),f_at_t_HB)
+    # reconstruct the function values from the coefficients
+    f_expansion_at_t_HB = np.real(np.dot(G,c))
+    
+    # create a set of omegas that's a noisy version of the actual omegas
+    # let noise be <10% of the actual values
+    noises = 0.10*np.array(actual_omegas)*np.random.rand(len(actual_omegas))
+    noisy_omegas = list(np.array(actual_omegas) + noises)
+    # compute an "exact" function containing only these noisy omegas
+    f_noisy, dummy = my_non_periodic_fun(t, noisy_omegas)
+
+    # pull out the exact noisy-function values at the time instances
+    f_noisy_at_t_HB, dummy = my_non_periodic_fun(t_HB, noisy_omegas)
+    # compute HB expansion coefficients by inverting G (with assumed omegas)
+    c_inv = np.dot(np.linalg.inv(G),f_noisy_at_t_HB)
+    # reconstruct the function values from the coefficients
+    f_noisy_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+    
+    # compute HB expansion coefficients by inverting G (with assumed omegas)
+    c_pinv = np.dot(np.linalg.pinv(G),f_noisy_at_t_HB)
+    # reconstruct the function values from the coefficients
+    f_noisy_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
+    
+    # plot everything
+    plot_name = 'HB_expansion_check'
+    auto_open = True
+    if time_discretization == 'use_T1' and not all_omegas_valid:
+        fourier_interp_HB = False
+    else:
+        fourier_interp_HB = True
+    plt.figure(plot_name)
+    plt.plot(t, f, 'k', label='$f_{exact}$')
+    plt.plot(t_HB, f_at_t_HB, 'ko')
+    plt.plot(t_HB, f_expansion_at_t_HB, 'r*', label='$f_{expansion}$')
+    if fourier_interp_HB:
+        t_HB_int, f_expansion_at_t_HB_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB,omegas,t)
+        plt.plot(t_HB_int,f_expansion_at_t_HB_int, 'r--', label='$spectral\,\,interp.$')
+    else:
+        plt.plot(t_HB, f_expansion_at_t_HB, 'r*--')
+    plt.xlabel('$t$', fontsize=14)
+    plt.ylabel('$f(t)$', fontsize=14)
+    plt.legend(loc='best')
+    plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
+              '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    # if fourier_interp_HB has been turned off, turn it back on and plot again
+    if not fourier_interp_HB:
+        # plot everything
+        plot_name = 'HB_expansion_check-with_fourier_interp'
+        auto_open = True
+        plt.figure(plot_name)
+        plt.plot(t, f, 'k', label='$f_{exact}$')
+        plt.plot(t_HB, f_at_t_HB, 'ko')
+        plt.plot(t_HB, f_expansion_at_t_HB, 'r*', label='$f_{expansion}$')
+        t_HB_int, f_expansion_at_t_HB_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB,omegas,t)
+        plt.plot(t_HB_int,f_expansion_at_t_HB_int, 'r--', label='$spectral\,\,interp.$')
+        plt.xlabel('$t$', fontsize=14)
+        plt.ylabel('$f(t)$', fontsize=14)
+        plt.legend(loc='best')
+        plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
+                  '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+    
+    # plot everything
+    plot_name = 'HB_expansion_check + noise'
+    auto_open = True
+    if time_discretization == 'use_T1' and not all_omegas_valid:
+        fourier_interp_HB = False
+    else:
+        fourier_interp_HB = True
+    plt.figure(plot_name)
+    plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
+    plt.plot(t_HB, f_noisy_at_t_HB, 'ko')
+    plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+    plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
+    if fourier_interp_HB:
+        t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+    else:
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*--')
+    t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
+    plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
+    plt.xlabel('$t$', fontsize=14)
+    plt.ylabel('$f(t)$', fontsize=14)
+    plt.legend(loc='best')
+    rounded_noisy_omegas = [float('{0:.4g}'.format(omega)) for omega in noisy_omegas]
+    plt.title('$\omega_{actual} = \{' + str(rounded_noisy_omegas)[1:-1] + \
+              '\} \quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    # if fourier_interp_HB has been turned off, turn it back on and plot again
+    if not fourier_interp_HB:
+        # plot everything
+        plot_name = 'HB_expansion_check + noise-with_fourier_interp'
+        auto_open = True
+        plt.figure(plot_name)
+        plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
+        plt.plot(t_HB, f_noisy_at_t_HB, 'ko')
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
+        t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
+        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
+        plt.xlabel('$t$', fontsize=14)
+        plt.ylabel('$f(t)$', fontsize=14)
+        plt.legend(loc='best')
+        rounded_noisy_omegas = [float('{0:.4g}'.format(omega)) for omega in noisy_omegas]
+        plt.title('$\omega_{actual} = \{' + str(rounded_noisy_omegas)[1:-1] + \
+                  '\} \quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+    
     ############################################################################
     # See how the error in the derivatives changes if the freqs used are wrong #
     ############################################################################
@@ -1690,7 +1845,7 @@ def main():
         current_D_cond = np.linalg.cond(D_HB)
         D_conds.append(current_D_cond)
         # E inverse
-        E_inv = HB_forward_transform_matrix(freqs, time_discretization)
+        E_inv = HB_expansion_matrix(freqs, time_discretization)
         current_E_inv_cond = np.linalg.cond(E_inv)
         E_inv_conds.append(current_E_inv_cond)
         # create a model function using the current pair of freqs and sample this
@@ -2204,7 +2359,7 @@ def main():
     print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
     print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
     print('\trank(D_HB) = ',np.linalg.matrix_rank(D_HB),'\n')
-    E_inv = HB_forward_transform_matrix(omegas, time_discretization)
+    E_inv = HB_expansion_matrix(omegas, time_discretization)
     N_E_inv = [[0]*N for i in range(N)]
     N_E_inv = np.zeros((N,N),dtype=np.complex_)
     for i in range(N):
