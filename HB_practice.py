@@ -14,7 +14,7 @@ from functools import reduce
 import sys                               # for finding machine zero
 
 from time_spectral import myLinspace, myNorm, linearInterp
-from iterative_methods import my_inv, my_pinv
+#from iterative_methods import my_inv, my_pinv
 from dft_practice import my_dft
 
 
@@ -148,47 +148,107 @@ def my_non_periodic_ode(t, u, omegas):
         dudt = np.array(dudt).reshape(len(dudt),1)
     return dudt
 #-----------------------------------------------------------------------------#
-def HB_time_instances(omegas, time_discretization='use_Nyquist'):
+def HB_time_instances(omegas, time_discretization):
     '''
     this function returns a numpy array corresponding to the desired time
     discretization:
-      - time_discretization = 'use_T1' (equally spaced points just spanning the
+      - time_discretization = a string that accepts various flags
+      -                    -> 'use_T1' (equally spaced points just spanning the
                                   period corresponding to the lowest frequency)
-      - time_discretization = 'use_Nyquist' (use Nyquist criterion for spacing)
+      -                    -> 'use_Nyquist' (use Nyquist criterion for spacing)
+      -                    -> '-random' (use a random/nonuniform spacing)
+      -                    -> '-5' (# of time points desired, default: 2*K+1)
+      - the default is: 
+                  time_discretization = 'use_Nyquist'
+        which means, "create a set of 2*K+1 uniformly spaced time instances 
+        that start at zero and are spaced such that they just satisfy the time-
+        interval requirement dictated by the Nyquist rate"
+      - but can accept complicated arguments such as:
+                  time_discretization = 'use_Nyquist-random-11'
+        which means, "randomly select 11 time instances that satisfy the time-
+        interval required by the Nyquist rate."
+      - or, can also accept an argument like:
+                  time_discretization = 'use_T1-random'
+        which means "randomly distribute 2*K+1 time instances within [0, T1)"
+      - or, another example:
+                  time_discretization = 'use_T1-15'
+        which means, "create a set of 15 uniformly spaced time instances that
+        are just shy of spanning the range [0, T1]"
     '''
     import numpy as np
-    # set the number of the time instances
-    K = len(omegas)
-    N = 2*K+1           # required for Fourier interpolation
-    if time_discretization == 'use_T1':
+    # compute N_0
+    K = len(omegas)     # number of angular frequencies provided
+    N_0 = 2*K+1         # minimum points required for Fourier interpolation
+    # initialize to defaults (use_Nyquist, uniform spacing (not random), N=N_0)
+    options = ['use_Nyquist', False, N_0]    
+    # parse the time_discretization string passed in
+    options_passed_in = time_discretization.split('-')
+    # run through the tokens and set the various options
+    for option in options_passed_in:
+        if option:
+            if option[:4]=='use_':
+                options[0] = option
+            elif option=='random':
+                options[1] = True
+            else:
+                options[2] = int(option)
+    # rename the options for clarity
+    discretization_style = options[0]   # (use_T1, use_Nyquist)
+    nonuniform_spacing = options[1]     # (True, False)
+    N = options[2]                      # an integer
+    # create the set of time instances as directed
+    if discretization_style=='use_T1':
         # time period corresponding to the lowest frequency
         T_lowest_omega = (2.0*np.pi)/min(omegas)
-        # compute the time interval
-        delta_t = T_lowest_omega/N
-    if time_discretization == 'use_Nyquist':
+        if nonuniform_spacing:
+            # randomly pick N points in the range [0,T1)
+            t_HB = sorted(T_lowest_omega*np.random.rand(N))
+        else:
+            # compute the time interval
+            delta_t = T_lowest_omega/N
+            # set the location of the time instances
+            t_HB = np.array([i*delta_t for i in range(N)])
+    if discretization_style=='use_Nyquist':
         # scaling up nyquist frequency by this factor (must be > 1)
         scaling_fac = 1.1
         # nyquist rate (this is a bandlimited signal)
         nyquist_rate = max(omegas)/np.pi
         # find the corresponding time interval
         delta_t = 1.0/(scaling_fac*nyquist_rate)
-    # set the location of the time instances
-    t_HB = np.array([i*delta_t for i in range(N)])
+        if nonuniform_spacing:
+            # set the first time instance, randomly within [0.0, delta_t)
+            t_HB = [float(delta_t*np.random.rand())]
+            # set the rest of the time instances, maintaining the time interval 
+            # corresponding to the nyquist rate
+            for i in range(N-1):
+                t_HB.append(t_HB[-1] + float(delta_t*np.random.rand()))
+            # convert to a numpy array
+            t_HB = np.array(t_HB)
+        else:
+            # set the location of the time instances
+            t_HB = np.array([i*delta_t for i in range(N)])
     return t_HB
 #-----------------------------------------------------------------------------#
 def HB_expansion_matrix(omegas, time_discretization):
     '''
     given the discrete set of nonzero angular frequencies and the time
     instances of interest, this subroutine returns the G matrix that 
-    represents the forward discrete Fourier transform taken at the specific 
-    frequencies
+    represents the forward discrete Fourier expansion taken at the specific 
+    frequencies. if the time points to use are already known, then pass them in
+    under time_discretization. if they're not known, then provide the typical
+    string needed by the HB_time_instances subroutine.
     '''
     import numpy as np
-    # set the location of the time instances
-    t_HB = HB_time_instances(omegas, time_discretization)
-    # set the number of the time instances
+    # if not provided, set the location of the time instances
+    if type(time_discretization)==str:
+        t_HB = HB_time_instances(omegas, time_discretization)
+    else:
+        t_HB = time_discretization
+    # extact the number of time instances
+    N = len(t_HB)
+    # compute the value of N_0
     K = len(omegas)
-    N = 2*K+1           # required for Fourier interpolation
+    N_0 = 2*K+1           # required for Fourier interpolation
     '''
     # create a list of all N discrete frequencies
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
@@ -204,9 +264,9 @@ def HB_expansion_matrix(omegas, time_discretization):
     # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K]
     w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
     # create the forward-transform matrix, G
-    G = np.zeros([N,N], dtype=np.complex_)
+    G = np.zeros([N,N_0], dtype=np.complex_)
     for i in range(N):
-        for j in range(N):
+        for j in range(N_0):
             G[i][j] = np.exp(1j*w[j]*t_HB[i])
     return G
 #-----------------------------------------------------------------------------#
@@ -216,9 +276,13 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pse
     differential operator matrix
     '''
     import numpy as np
-    from functools import reduce
     # set the location of the time instances
     t_HB = HB_time_instances(omegas, time_discretization)
+    # extact the number of time instances
+    N = len(t_HB)    
+    # compute the value of N_0
+    K = len(omegas)
+    N_0 = 2*K+1           # required for Fourier interpolation
     '''    
     # create a list of all N discrete frequencies
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
@@ -233,7 +297,7 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pse
     # construct the forward-tranform matrix
     G = HB_expansion_matrix(omegas, time_discretization)
     # take the (pseudo)inverse and construct the operator
-    if use_pseudoinverse:
+    if use_pseudoinverse or not N==N_0:
         # take the pseudoinverse of the forward-transform matrix
         # n.b. numpy's pinv gives the left pseudoinverse, which is what we want
         G_plus = np.linalg.pinv(G)
@@ -251,10 +315,17 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pse
 #-----------------------------------------------------------------------------#
 def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
     '''
+    
+    (This function should probably be called 'HB_interp' because it's not a
+     Fourier series if you're just picking a handful of angular frequencies.)
     This function interpolates a given set of ordinates and abscissas with a
     Fourier series that uses a specific set of frequencies. The interpolation 
-    is constructed using coefficients found for the cosine and sine terms by
-    solving a linear system built up from the given abscissas and ordinates.
+    is constructed using coefficients found for the complex exponential terms 
+    (OR cosine and sine terms) by solving a linear system built up from the 
+    given abscissas and ordinates.
+    if the number of samples is not equal to 2K+1, where K=len(omegas), then
+    the linear system can only be solved in a least-squares sense. that is, 
+    instead of using the inverse of G, one must take the pseudoinverse of G.
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
       - ordinates, y (as a list) (again, leave out last point, if periodic)
@@ -263,9 +334,8 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
     Output:
       - new abscissas, x_int (as a list)
       - interpolated ordinates, y_int (as a list)
-      - derivative of the interpolant, dydx_int (as a list)
+      - (derivative of the interpolant, dydx_int (as a list))
     '''
-    import math
     import numpy as np
     # refinment factor for the interpolant. (If there are originally 10 points
     # but you want the Fourier Series to be defined on 50 points, then the 
@@ -276,6 +346,26 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
     # if zero has not been included as a frequency, add it
     if 0 not in omegas:
         omegas = [0.0] + omegas
+    # set x_int, if it hasn't been given
+    if type(x_int) == bool:
+        n_int = refine_fac*(n)
+        x_int = myLinspace(x[0],x[-1]+x[1],n_int)
+    else:
+        n_int = len(x_int)
+    # compute the harmonic-balance expansion matrix for the given points
+    G = HB_expansion_matrix(omegas, time_discretization=x)
+    # compute the coefficients required in a least-squares sense, i.e. find c
+    # in Gc=y by doing c = pinv(G)y -- must use pinv(G) b/c G may not be square
+    c = np.dot(np.linalg.pinv(G), np.array(y).reshape(n,1))
+    # create a new G matrix based on the time grid we are interpolating onto
+    G_int = HB_expansion_matrix(omegas, time_discretization=x_int)
+    # multiply with the coefficients to find the interpolant
+    y_int = np.real(np.dot(G_int, c))
+    # return the interpolant
+    dummy = 0
+    return (x_int, y_int, dummy)
+    '''
+    import math
     # total number of frequencies being considered, including the D.C. value
     m = len(omegas)
     # compute the coefficients by setting up and solving a linear system
@@ -323,6 +413,7 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
         return (x_int, y_int, dydx_int, a, b)
     else:
         return (x_int, y_int, dydx_int)
+    '''
 #-----------------------------------------------------------------------------#    
 def plot_eigenvalues(A, auto_open=False):
     '''
@@ -799,7 +890,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             print('\n\titer: '+str(iteration)+'\t||residual||: '+str(norm_residual), end='')
         # compute the "error," which is a function of the residual, for pseudo-
         # trasient continuation (pseudo-time stepping)
-        I = np.eye(2*len(omegas)+1)     # identity matrix
+        I = np.eye(len(residual))     # identity matrix
         step_size = delta_tau
         B = step_size*I
         error = np.dot(B,residual)
@@ -1458,6 +1549,7 @@ def main():
     '''
     # turn off interactive mode, so that plot windows don't pop up
     plt.ioff()
+    
     ###############
     # user inputs #
     ###############
@@ -1473,9 +1565,23 @@ def main():
     # angular frequencies input by the user to the HB method
     omegas = copy.copy(actual_omegas)       # use the exact values
     
+    # number of angular frequencies being used
+    K = len(omegas)
+    
     # select the time discretization to use for specifying the of time instances
     time_discretization = 'use_Nyquist'
-    time_discretization = 'use_T1'
+    time_discretization = 'use_Nyquist-random'
+    time_discretization = 'use_Nyquist-'+str(K+1)
+    #time_discretization = 'use_Nyquist-random-'+str(K+1)
+    #time_discretization = 'use_Nyquist-'+str(3*K+1)
+    #time_discretization = 'use_Nyquist-random-'+str(3*K+1)
+    #time_discretization = 'use_T1'
+    #time_discretization = 'use_T1-random'
+    #time_discretization = 'use_T1-'+str(K+1)
+    #time_discretization = 'use_T1-random-'+str(K+1)
+    #time_discretization = 'use_T1-'+str(3*K+1)
+    #time_discretization = 'use_T1-random-'+str(3*K+1)
+    
     
     ##############################################################
     # define the governing equation based on these actual omegas #
@@ -1487,7 +1593,7 @@ def main():
     ##############################################################################
     # inadmissibiltiy check: are these omegas compatible with T1 discretization? #
     ##############################################################################
-    if time_discretization == 'use_T1':
+    if time_discretization == 'use_T1' or time_discretization=='use_T1-random':
         # omega_dicts contains all the constraints on each given angular 
         # frequency, invalid_omegas is a list of tuples containing the number 
         # and value of each inadmissible angular frequency
@@ -1514,16 +1620,45 @@ def main():
     # print message to the screen
     print('\nchecking the properties of the HB operator matrix...')
     
-    # "exact" fine time grid to evaluate function
-    T_lowest_omega = 2.0*np.pi/min(omegas)
-    t_fine_points = 200
-    t = np.linspace(0.0,T_lowest_omega, t_fine_points)
-    # find the exact function and function derivative values at the time points
-    f,df = my_non_periodic_fun(t, actual_omegas)
-    
     # create the harmonic balance operator matrix
     print('\n( time_discretization = ', time_discretization,')')
     D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization, use_pseudoinverse=True)
+    print('t_HB =', t_HB)
+    
+    # define an "exact" fine time grid
+    T_lowest_omega = 2.0*np.pi/min(omegas)
+    t_fine_points = 200
+    if t_HB[-1] > T_lowest_omega:
+        t = np.linspace(0.0, t_HB[-1], t_fine_points)
+    else:
+        t = np.linspace(0.0, T_lowest_omega, t_fine_points)
+    # find the exact function and function derivative values at the time points
+    f,df = my_non_periodic_fun(t, actual_omegas)
+
+    # nyquist rate for given omegas (this is a bandlimited signal)
+    nyquist_rate = max(omegas)/np.pi    
+    # maximum allowable time interval while still satisfying nyquist rate
+    delta_t_nyquist = 1.0/nyquist_rate
+    # run through the time instances and check the length of the intervals
+    intervals_satisfy_nyquist = []
+    nyquist_satisfied_for_all = True
+    for i in range(len(t_HB)-1):
+        current_delta_t = t_HB[i+1]-t_HB[i]
+        intervals_satisfy_nyquist.append(current_delta_t<delta_t_nyquist)
+        if current_delta_t < delta_t_nyquist:
+            intervals_satisfy_nyquist.append(True)
+        else:
+            nyquist_satisfied_for_all = False
+            intervals_satisfy_nyquist.append(False)
+    print('nyquist_rate =', nyquist_rate)
+    print('intervals_satisfy_nyquist =', intervals_satisfy_nyquist)
+    print('nyquist_satisfied_for_all =', nyquist_satisfied_for_all)
+    
+    # create a string with information characterizing the time instances
+    t_HB_info = '('+time_discretization+' instances '
+    if nyquist_satisfied_for_all:
+        t_HB_info += '-- nyquist_satisfied'
+    t_HB_info += ')'
     
     # plot the eigenvalues of the HB operator matrix
     plot_eigenvalues(D_HB, auto_open=False)
@@ -1534,9 +1669,10 @@ def main():
     df_HB = np.dot(D_HB, f_at_t_HB)
     
     # plot everything
-    plot_name = 'HB_operator_check'
-    auto_open = False
+    plot_name = 'HB_operator_check '+t_HB_info
+    auto_open = True
     fourier_interp_HB = all_omegas_valid
+    #fourier_interp_HB = False    
     plt.figure(plot_name)
     plt.plot(t, f, label='$f_{exact}$')
     plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
@@ -1563,22 +1699,30 @@ def main():
     if auto_open:
         webbrowser.open(file_name)
     
-    ###############################################
-    # check to see if the HB expansion is working #
-    ###############################################
+    ##########################################
+    # check to see if the HB expansion works #
+    ##########################################
     
     # again, pull out the exact function values at the time instances
     f_at_t_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
     # construct the the forward "transform" matrix
     G = HB_expansion_matrix(omegas, time_discretization)
-    # compute the HB expansion coefficients
-    c = np.dot(np.linalg.inv(G),f_at_t_HB)
+    # check to see if the G matrix is square
+    G_is_square = len(t_HB)==2*K+1
+    # if you can, compute the HB expansion coefficients using the inverse
+    if G_is_square:
+        c_inv = np.dot(np.linalg.inv(G),f_at_t_HB)
+        # reconstruct the function values from the coefficients
+        f_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+    
+    # compute HB expansion coefficients by taking the pseudoinverse of G
+    c_pinv = np.dot(np.linalg.pinv(G),f_at_t_HB)
     # reconstruct the function values from the coefficients
-    f_expansion_at_t_HB = np.real(np.dot(G,c))
+    f_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
     
     # create a set of omegas that's a noisy version of the actual omegas
     # let noise be <10% of the actual values
-    noises = 0.10*np.array(actual_omegas)*np.random.rand(len(actual_omegas))
+    noises = 0.10*np.array(actual_omegas)*(np.random.rand(len(actual_omegas))-0.5)
     noisy_omegas = list(np.array(actual_omegas) + noises)
     # compute an "exact" function containing only these noisy omegas
     f_noisy, dummy = my_non_periodic_fun(t, noisy_omegas)
@@ -1586,17 +1730,18 @@ def main():
     # pull out the exact noisy-function values at the time instances
     f_noisy_at_t_HB, dummy = my_non_periodic_fun(t_HB, noisy_omegas)
     # compute HB expansion coefficients by inverting G (with assumed omegas)
-    c_inv = np.dot(np.linalg.inv(G),f_noisy_at_t_HB)
-    # reconstruct the function values from the coefficients
-    f_noisy_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+    if G_is_square:
+        c_inv = np.dot(np.linalg.inv(G),f_noisy_at_t_HB)
+        # reconstruct the function values from the coefficients
+        f_noisy_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
     
-    # compute HB expansion coefficients by inverting G (with assumed omegas)
+    # compute HB expansion coefficients by taking the pseudoinverse of G
     c_pinv = np.dot(np.linalg.pinv(G),f_noisy_at_t_HB)
     # reconstruct the function values from the coefficients
     f_noisy_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
     
     # plot everything
-    plot_name = 'HB_expansion_check'
+    plot_name = 'HB_expansion_check '+t_HB_info
     auto_open = True
     if time_discretization == 'use_T1' and not all_omegas_valid:
         fourier_interp_HB = False
@@ -1604,13 +1749,17 @@ def main():
         fourier_interp_HB = True
     plt.figure(plot_name)
     plt.plot(t, f, 'k', label='$f_{exact}$')
-    plt.plot(t_HB, f_at_t_HB, 'ko')
-    plt.plot(t_HB, f_expansion_at_t_HB, 'r*', label='$f_{expansion}$')
-    if fourier_interp_HB:
-        t_HB_int, f_expansion_at_t_HB_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB,omegas,t)
-        plt.plot(t_HB_int,f_expansion_at_t_HB_int, 'r--', label='$spectral\,\,interp.$')
-    else:
-        plt.plot(t_HB, f_expansion_at_t_HB, 'r*--')
+    plt.plot(t_HB, f_at_t_HB, 'ko')    
+    if G_is_square:
+        plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*', label='$f_{expansion, inv}$')
+        if fourier_interp_HB:
+            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
+            plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        else:        
+            plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*--')
+    plt.plot(t_HB, f_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion, pinv}$')
+    t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
+    plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
     plt.xlabel('$t$', fontsize=14)
     plt.ylabel('$f(t)$', fontsize=14)
     plt.legend(loc='best')
@@ -1629,14 +1778,18 @@ def main():
     # if fourier_interp_HB has been turned off, turn it back on and plot again
     if not fourier_interp_HB:
         # plot everything
-        plot_name = 'HB_expansion_check-with_fourier_interp'
+        plot_name = 'HB_expansion_check-with_fourier_interp '+t_HB_info
         auto_open = True
         plt.figure(plot_name)
         plt.plot(t, f, 'k', label='$f_{exact}$')
         plt.plot(t_HB, f_at_t_HB, 'ko')
-        plt.plot(t_HB, f_expansion_at_t_HB, 'r*', label='$f_{expansion}$')
-        t_HB_int, f_expansion_at_t_HB_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB,omegas,t)
-        plt.plot(t_HB_int,f_expansion_at_t_HB_int, 'r--', label='$spectral\,\,interp.$')
+        if G_is_square:
+            plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*', label='$f_{expansion, inv}$')
+            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
+            plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        plt.plot(t_HB, f_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion, pinv}$')
+        t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
+        plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
         plt.xlabel('$t$', fontsize=14)
         plt.ylabel('$f(t)$', fontsize=14)
         plt.legend(loc='best')
@@ -1653,7 +1806,7 @@ def main():
             webbrowser.open(file_name)
     
     # plot everything
-    plot_name = 'HB_expansion_check + noise'
+    plot_name = 'HB_expansion_check + noise '+t_HB_info
     auto_open = True
     if time_discretization == 'use_T1' and not all_omegas_valid:
         fourier_interp_HB = False
@@ -1661,14 +1814,15 @@ def main():
         fourier_interp_HB = True
     plt.figure(plot_name)
     plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
-    plt.plot(t_HB, f_noisy_at_t_HB, 'ko')
-    plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+    plt.plot(t_HB, f_noisy_at_t_HB, 'ko')    
+    if G_is_square:
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+        if fourier_interp_HB:
+            t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+            plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        else:
+            plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*--')
     plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
-    if fourier_interp_HB:
-        t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
-        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
-    else:
-        plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*--')
     t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
     plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
     plt.xlabel('$t$', fontsize=14)
@@ -1690,15 +1844,16 @@ def main():
     # if fourier_interp_HB has been turned off, turn it back on and plot again
     if not fourier_interp_HB:
         # plot everything
-        plot_name = 'HB_expansion_check + noise-with_fourier_interp'
+        plot_name = 'HB_expansion_check + noise-with_fourier_interp '+t_HB_info
         auto_open = True
         plt.figure(plot_name)
         plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
         plt.plot(t_HB, f_noisy_at_t_HB, 'ko')
-        plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+        if G_is_square:
+            plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
+            t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+            plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')        
         plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
-        t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
-        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
         t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
         plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
         plt.xlabel('$t$', fontsize=14)
@@ -1823,7 +1978,7 @@ def main():
     first_omega = omegas[0]
     starting_multiple = first_omega
     penultimate_omega = omegas[-2]
-    penultimate_multiple = penultimate_omega/first_omega
+    #penultimate_multiple = penultimate_omega/first_omega
     nondim_penultimate_omega = 2.0*(penultimate_omega-first_omega)/(penultimate_omega+first_omega)
     max_multiple = 25.0
     multiples = myLinspace(starting_multiple, max_multiple, 50*int(max_multiple-starting_multiple)+1)
@@ -1864,7 +2019,7 @@ def main():
     D_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
     E_inv_cutoff = 1e12
     E_inv_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
-    E_inv_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
+    #E_inv_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
     df_percent_tol = 1e-5
     df_error_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
     df_error_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
@@ -2173,7 +2328,7 @@ def main():
                                     residual_convergence_criteria=fully_converged,
                                     make_plot=True, auto_open_plot=True, 
                                     make_movie=True, auto_play_movie=False,
-                                    optimize_omegas=True)
+                                    optimize_omegas=False)
         
     # interpolate the harmonic-balance solution using the prescribed frequencies
     t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
