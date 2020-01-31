@@ -160,7 +160,7 @@ def myLinspace(start,end,n):
         return points
     
 # this function interpolates a series of points with a Fourier series #########
-def fourierInterp(x, y, x_int=None):
+def fourierInterp(x, y, x_int=0):
     
     """
     This function interpolates a given set of ordinates and abscissas with a
@@ -214,7 +214,7 @@ def fourierInterp(x, y, x_int=None):
             b[j] += (2.0/n)*math.sin(j*scaled_x)*y[i]
     
     # set x_int, if it hasn't been given
-    if x_int == None:
+    if type(x_int) == int:
         n_int = refine_fac*(n)
         x_int = myLinspace(x[0],x[-1]+x_interval,n_int)
     else:

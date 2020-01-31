@@ -14,9 +14,8 @@ from functools import reduce
 import sys                               # for finding machine zero
 
 from time_spectral import myLinspace, myNorm, linearInterp
-#from iterative_methods import my_inv, my_pinv
+from iterative_methods import my_inv, my_pinv, my_rank
 from dft_practice import my_dft
-
 
 
 #-----------------------------------------------------------------------------#
@@ -28,7 +27,7 @@ def period_given_freqs(omegas):
     '''
     import decimal
     from functools import reduce
-    from math import gcd
+    from math import gcd, pi
     # find the maximum number of decimal points seen the given frequencies
     decimal_pts = [-decimal.Decimal(str(f)).as_tuple().exponent for f in omegas]
     max_dec_pts = max(decimal_pts)
@@ -37,34 +36,59 @@ def period_given_freqs(omegas):
     # find the greatest common divisor of these scaled frequencies
     GCD = reduce(lambda x,y: gcd(x,y), scaled_omegas)
     # find the total period
-    total_period = 2.0*math.pi/(GCD/pow(10,max_dec_pts))
+    total_period = 2.0*pi/(GCD/pow(10,max_dec_pts))
     return total_period
 #-----------------------------------------------------------------------------#
-def my_non_periodic_fun(t, omegas):
+def my_non_periodic_fun(t, omegas, verbose=False):
     '''
     given a set of specfied frequencies and time points, this subroutine 
     samples a function composed of a sum of sinusoids oscillating at the 
     frequencies specified
     returns numpy column vectors
     '''
+    #omegas += [8.6]         # add an additional angular frequency. this ensures
+                            # that the HB expansion will never be perfect.
     import numpy as np
     f = []
     df = []
+    equation_string = 'f(t) = '
     # run through all the time samples
+    counter = 1
     for t_i in t:
-        f_i = 0 + 5
+        f_i = 0 + 60.4
+        f_i = 0 + 60.0
         df_i = 0
+        if counter == 1:
+            equation_string += str(f_i)
         # run through all the frequencies
         for omega in omegas:
-            f_i += math.sin(omega*t_i)
-            df_i += omega*math.cos(omega*t_i)
+            # f = sum of sines
+            #f_i += math.sin(omega*t_i)
+            #df_i += omega*math.cos(omega*t_i)
+
+            # f = sum of amplified sines and cosines
+            #a_i = -np.sin(omega)/np.sqrt(omega)
+            #b_i = np.cos(omega)**3
+            a_i = 0.2*omega     # sine coeff
+            b_i = omega**2.0                  # cosine coeff
+            f_i += a_i*math.sin(omega*t_i) + b_i*math.cos(omega*t_i)
+            df_i += omega*(a_i*math.cos(omega*t_i) - b_i*math.sin(omega*t_i))
+            if counter == 1:
+                equation_string += ' + '+str(round(a_i,3))+'*sin('+str(omega)+'*t) + '+str(round(b_i,3))+'*cos('+str(omega)+'*t)'
+            
+            # f = sum of squared sines (this is not tonal! HB will fail!)
+            #f_i += math.sin(omega*t_i)**2.0
+            #df_i += 2.0*math.sin(omega*t_i)*omega*math.cos(omega*t_i)
         f.append(f_i)
         df.append(df_i)
+        counter += 1
     # turn f and df into numpy column vectors
     f = np.array(f)
     f = f.reshape(f.size,1)
     df = np.array(df)
     df = df.reshape(df.size,1)
+    if verbose:
+        print('\nfunction being used:\n\n\t'+equation_string+'\n')
     return f, df
 #-----------------------------------------------------------------------------#
 class governing_ode:
@@ -148,6 +172,36 @@ def my_non_periodic_ode(t, u, omegas):
         dudt = np.array(dudt).reshape(len(dudt),1)
     return dudt
 #-----------------------------------------------------------------------------#
+def parse_time_discretization_string(omegas, time_discretization):
+    '''
+    read in the time-discretization string and parse out the different pieces,
+    namely: the discretization style (i.e. whether we're using T1 or Nyquist),
+    the type of spacing (i.e. whether the spacing is uniform or arbitrary), and
+    the number of time instances.
+    '''
+    # compute N_0
+    K = len(omegas)     # number of angular frequencies provided
+    N_0 = 2*K+1         # minimum points required for trig interpolation
+    # initialize to defaults (use_Nyquist, uniform spacing (not random), N=N_0)
+    options = ['use_Nyquist', False, N_0]    
+    # parse the time_discretization string passed in
+    options_passed_in = time_discretization.split('-')
+    # run through the tokens and set the various options
+    for option in options_passed_in:
+        if option:
+            if option[:4]=='use_':
+                options[0] = option
+            elif option=='random':
+                options[1] = True
+            else:
+                options[2] = int(option)
+    # rename the options for clarity
+    discretization_style = options[0]   # (use_T1, use_Nyquist)
+    nonuniform_spacing = options[1]     # (True, False)
+    N = options[2]                      # an integer
+    # return the options found
+    return discretization_style, nonuniform_spacing, N
+#-----------------------------------------------------------------------------#
 def HB_time_instances(omegas, time_discretization):
     '''
     this function returns a numpy array corresponding to the desired time
@@ -176,26 +230,10 @@ def HB_time_instances(omegas, time_discretization):
         are just shy of spanning the range [0, T1]"
     '''
     import numpy as np
-    # compute N_0
-    K = len(omegas)     # number of angular frequencies provided
-    N_0 = 2*K+1         # minimum points required for Fourier interpolation
-    # initialize to defaults (use_Nyquist, uniform spacing (not random), N=N_0)
-    options = ['use_Nyquist', False, N_0]    
-    # parse the time_discretization string passed in
-    options_passed_in = time_discretization.split('-')
-    # run through the tokens and set the various options
-    for option in options_passed_in:
-        if option:
-            if option[:4]=='use_':
-                options[0] = option
-            elif option=='random':
-                options[1] = True
-            else:
-                options[2] = int(option)
-    # rename the options for clarity
-    discretization_style = options[0]   # (use_T1, use_Nyquist)
-    nonuniform_spacing = options[1]     # (True, False)
-    N = options[2]                      # an integer
+    # parse the time_discretization string and extract the relevant information
+    discretization_style, \
+    nonuniform_spacing, \
+    N = parse_time_discretization_string(omegas, time_discretization)
     # create the set of time instances as directed
     if discretization_style=='use_T1':
         # time period corresponding to the lowest frequency
@@ -210,7 +248,10 @@ def HB_time_instances(omegas, time_discretization):
             t_HB = np.array([i*delta_t for i in range(N)])
     if discretization_style=='use_Nyquist':
         # scaling up nyquist frequency by this factor (must be > 1)
-        scaling_fac = 1.1
+        scaling_fac = 1.01      # just satisfies Nyquist
+        #scaling_fac = 0.21       # fails to satisfy Nyquist (but will often work, b/c matrix will still be full rank!)
+        #scaling_fac = 0.5       # fails to satisfy Nyquist (but will never work because columns are periodic with 1 in the ratio omega_k/omega_K, so omega_0 = omega_-K + omega_K, every possible omega_K is inadmissible and )
+        #scaling_fac = 1.5       # should result in bad omegas...or maybe not...looks like not
         # nyquist rate (this is a bandlimited signal)
         nyquist_rate = max(omegas)/np.pi
         # find the corresponding time interval
@@ -233,7 +274,7 @@ def HB_expansion_matrix(omegas, time_discretization):
     '''
     given the discrete set of nonzero angular frequencies and the time
     instances of interest, this subroutine returns the G matrix that 
-    represents the forward discrete Fourier expansion taken at the specific 
+    represents the forward discrete trig expansion taken at the specific 
     frequencies. if the time points to use are already known, then pass them in
     under time_discretization. if they're not known, then provide the typical
     string needed by the HB_time_instances subroutine.
@@ -248,7 +289,7 @@ def HB_expansion_matrix(omegas, time_discretization):
     N = len(t_HB)
     # compute the value of N_0
     K = len(omegas)
-    N_0 = 2*K+1           # required for Fourier interpolation
+    N_0 = 2*K+1           # required for finding the trig coefficients
     '''
     # create a list of all N discrete frequencies
     # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
@@ -270,24 +311,21 @@ def HB_expansion_matrix(omegas, time_discretization):
             G[i][j] = np.exp(1j*w[j]*t_HB[i])
     return G
 #-----------------------------------------------------------------------------#
-def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pseudoinverse=False):
+def harmonic_balance_operator(omegas, time_discretization='use_Nyquist'):
     '''
-    given a discrete set of frequencies, compute the harmonic-balance 
+    given a discrete set of frequencies and a time discretization (either 
+    instructions on how to select the time instances in a string OR the actual
+    time instances to use as a numpy array) compute the harmonic-balance 
     differential operator matrix
     '''
     import numpy as np
-    # set the location of the time instances
-    t_HB = HB_time_instances(omegas, time_discretization)
-    # extact the number of time instances
-    N = len(t_HB)    
-    # compute the value of N_0
-    K = len(omegas)
-    N_0 = 2*K+1           # required for Fourier interpolation
-    '''    
-    # create a list of all N discrete frequencies
-    # w = [0, w_1, ..., w_K, -w_K, ..., -w_1]
-    w = [0]+omegas+[-omegas[-(i+1)] for i in range(len(omegas))]
-    '''
+    
+    # if not provided, set the location of the time instances
+    if type(time_discretization)==str:
+        # set the location of the time instances, as directed
+        t_HB = HB_time_instances(omegas, time_discretization)
+    else:
+        t_HB = time_discretization
     # create a list of all 2*K+1 discrete frequencies, from -K to +K
     # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K]
     w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
@@ -295,41 +333,60 @@ def harmonic_balance_operator(omegas, time_discretization='use_Nyquist', use_pse
     w_imag = [1j*w_i for w_i in w]
     Omega = np.diag(w_imag)
     # construct the forward-tranform matrix
-    G = HB_expansion_matrix(omegas, time_discretization)
-    # take the (pseudo)inverse and construct the operator
-    if use_pseudoinverse or not N==N_0:
-        # take the pseudoinverse of the forward-transform matrix
-        # n.b. numpy's pinv gives the left pseudoinverse, which is what we want
-        G_plus = np.linalg.pinv(G)
+    G = HB_expansion_matrix(omegas, time_discretization=t_HB)
+    # check to see if G has full rank:
+    # n.b. "full rank" means either full column rank OR full row rank. in other
+    # words, if a matrix has full rank, it has linearly independent columns,
+    # linearly independent rows, or both. for an m-by-n matrix, check for full
+    # rank by seeing if r = min(m,n)
+    r = my_rank(G)
+    print('rank(G) = ', r)
+    print('np.linalg.matrix_rank(G) =', np.linalg.matrix_rank(G))
+    shorter_dimension = min(np.shape(G))
+    if r == shorter_dimension:
+        full_rank = True
+    else:
+        full_rank = False
+    # take the (approximate) pseudoinverse of G and construct the operator
+    if full_rank:
+        # compute the pseudoinverse of the forward-transform matrix (n.b. if G
+        # is square and has full rank, then it's invertible. the pseudoinverse
+        # will be identical to the inverse of G)
+        G_plus = my_pinv(G)
+        #G_plus = np.linalg.pinv(G) #HACK
         # compute the operator (D_HB = G*Omega*G_plus)
-        # is always real...why?
+        # it's always real...proven.
         D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [G, Omega, G_plus]))
     else:        
-        # take the inverse of the forward-tranform matrix
-        G_inv = np.linalg.inv(G)
-        # compute the operator (D_HB = G*Omega*G_inv)
-        # is always real...why?
-        D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [G, Omega, G_inv]))
+        # compute an approximate pseudoinverse of the forward-tranform matrix
+        G_tilde_plus = my_pinv(G, approximate_using_svd=True)
+        # compute the operator (D_HB = G*Omega*G_tilde_plus)
+        # it's always real... proven.
+        D_HB = np.real(reduce(lambda x,y: np.dot(x,y), [G, Omega, G_tilde_plus]))
     # return the operator matrix and the time instances
     return (D_HB, t_HB)
 #-----------------------------------------------------------------------------#
-def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
+def trig_interp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
     '''
     
-    (This function should probably be called 'HB_interp' because it's not a
+    (This function should probably be called 'trig_interp' because it's not a
      Fourier series if you're just picking a handful of angular frequencies.)
     This function interpolates a given set of ordinates and abscissas with a
-    Fourier series that uses a specific set of frequencies. The interpolation 
-    is constructed using coefficients found for the complex exponential terms 
-    (OR cosine and sine terms) by solving a linear system built up from the 
-    given abscissas and ordinates.
+    trigonometric series that uses only a specific set of frequencies (tones). 
+    The interpolation is constructed using coefficients found for the 
+    corresponding complex-exponential terms by solving a linear system built up 
+    from the given abscissas and ordinates.
     if the number of samples is not equal to 2K+1, where K=len(omegas), then
     the linear system can only be solved in a least-squares sense. that is, 
     instead of using the inverse of G, one must take the pseudoinverse of G.
+    once the coefficients are found, they are projected onto a fine 
+    (interpolant) grid by multiplication with a G_int matrix, which is a matrix
+    of complex exponential samples, just like G, but with a row for each point
+    in x_int.
     Input:
       - abscissas, x (as a list) (leave out last, duplicate point in period)
       - ordinates, y (as a list) (again, leave out last point, if periodic)
-      - angular frequencies, omegas (as a list)
+      - angular frequencies or "tones", omegas (as a list)
       - new abscissas, x_int (as a list) (optional! defaults to 10x refinement)
     Output:
       - new abscissas, x_int (as a list)
@@ -338,32 +395,57 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False, return_coeffs=False):
     '''
     import numpy as np
     # refinment factor for the interpolant. (If there are originally 10 points
-    # but you want the Fourier Series to be defined on 50 points, then the 
-    # refinement factor is 5.)
+    # but you want the Trigonometric Series to be defined on 50 points, then  
+    # the refinement factor is 5.)
     refine_fac = 10
     # number of points passed in
-    n = len(x)                  
+    n = len(x)
+    # rename and reshape the ordinates into a column vector
+    y_vec = np.array(y).reshape(n,1)
     # if zero has not been included as a frequency, add it
-    if 0 not in omegas:
-        omegas = [0.0] + omegas
+    #if 0 not in omegas:
+    #    omegas = [0.0] + omegas
     # set x_int, if it hasn't been given
     if type(x_int) == bool:
         n_int = refine_fac*(n)
         x_int = myLinspace(x[0],x[-1]+x[1],n_int)
     else:
         n_int = len(x_int)
+        
     # compute the harmonic-balance expansion matrix for the given points
     G = HB_expansion_matrix(omegas, time_discretization=x)
-    # compute the coefficients required in a least-squares sense, i.e. find c
-    # in Gc=y by doing c = pinv(G)y -- must use pinv(G) b/c G may not be square
-    c = np.dot(np.linalg.pinv(G), np.array(y).reshape(n,1))
+    
+    # compute HB expansion coefficients by taking the pseudoinverse of G
+    try:
+        c_pinv = np.dot(my_pinv(G), y_vec)
+    except ValueError:
+        print('\n\tDuring interpolation: G matrix doesn\'t have full rank...'+\
+              ' using an approximate pseudoinverse...\n')
+        c_pinv = np.dot(my_pinv(G, approximate_using_svd=True), y_vec)
     # create a new G matrix based on the time grid we are interpolating onto
-    G_int = HB_expansion_matrix(omegas, time_discretization=x_int)
-    # multiply with the coefficients to find the interpolant
-    y_int = np.real(np.dot(G_int, c))
-    # return the interpolant
-    dummy = 0
-    return (x_int, y_int, dummy)
+    G_fine = HB_expansion_matrix(omegas, time_discretization=x_int)
+    # multiply G_fine by the coefficients to construct the interpolant
+    y_int = np.real(np.dot(G_fine,c_pinv))
+    
+    # for the derivative, we're basically just multiplying by the HB operator,
+    # except now the HB operator has n_int rows instead of just 2K+1. warning:
+    # if you want the derivative to be correct here, you need to make sure the 
+    # original abscissas, x, satisfy the Nyquist criterion!
+    # anyway, the first step is to create the Omega matrix:
+    # create a list of all 2*K+1 discrete frequencies, from -K to +K
+    # w = [-w_K, ..., -w_1, 0, w_1, ..., w_K]
+    w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
+    # create the diagonal matrix holding the frequencies
+    w_imag = [1j*w_i for w_i in w]
+    Omega = np.diag(w_imag)
+    # then, we get the derivative dy/dx at the interpolation points by doing
+    # G_fine*Omega*pinv(G)*y_vec = G_fine*Omega*c_pinv
+    dydx_int = np.real(reduce(lambda x,y: np.dot(x,y), [G_fine, Omega, c_pinv]))
+    
+    # return the interpolant and the derivative
+    return (x_int, y_int, dydx_int)
+    
+    
     '''
     import math
     # total number of frequencies being considered, including the D.C. value
@@ -492,7 +574,7 @@ def compute_cost(t_HB, f_HB, omegas, delta_t, actual_omegas):
     cost = np.linalg.norm(f_HB_plus_T_plus_dt-f_HB_plus_dt)
     return cost
 #-----------------------------------------------------------------------------#
-def HB_omega_check(omegas_given, make_plots=True):
+def HB_omega_check(omegas_given, N_time_instances='2K+1', make_plots=True):
     '''
     only use this subroutine if the HB time instances are uniformly spaced and
     just shy of spanning T1 (the period corresponding to the lowest frequency).
@@ -513,8 +595,43 @@ def HB_omega_check(omegas_given, make_plots=True):
     all_omegas_valid = True
     # total number of given angular frequencies
     K = len(omegas_given)
-    # find the ccorresponding number of columns
-    N = 2*K+1
+    # compute 2*K+1 
+    N_0 = 2*K+1    
+    # find the number of time instances being used (no. of rows in G)
+    if N_time_instances == '2K+1':
+        N = N_0
+    else:
+        N = N_time_instances
+    # set the best-possible rank of matrix G for the given situation
+    if N < N_0:
+        # for the case where N < N_0 (G has fewer rows than columns -- fewer 
+        # time instances than the 2K+1 omega values), the rank of the matrix G
+        # can be no greater than the number of rows, N (since row rank = column 
+        # rank). BUT, any rank degeneracies found below must still be 
+        # subtracted from N_0. if that rank is less than N, then we have
+        # a matrix with a rank smaller than the best possible, otherwise, the
+        # limiting factor is the row rank, N. so, the rank of the matrix will
+        # finally be given by rank(G) = min(N, N_0-degeneracies)
+        # n.b. full column rank -- which is what we need to construct the left 
+        # pseudoinverse of G -- is impossible when N < N_0. expect poor results
+        best_possible_rank = N
+        # print warnings to the screen
+        print()
+        print('\t\t***    WARNING: INSUFFICIENT NUMBER OF TIME INSTANCES   ***')
+        if N_0-N == 1:
+            print('\t\t***     need to use at least '+str(N_0-N)+' more time instance!     ***')
+        else:
+            print('\t\t***     need to use at least '+str(N_0-N)+' more time instances!     ***')
+        print('\t\t***   otherwise full column rank will not be possible!  ***')
+        print('\t\t***      nevermind the omega values until then!         ***')
+    else:
+        # for the case where N >= N_0, full column rank corresponds to N_0. 
+        # even though there may be more than N_0 rows, the rank of G can be, at 
+        # most, N_0 (since row rank = column rank). any rank degeneracies found 
+        # below must therefore be subtracted from N_0, not N. since full column 
+        # rank can be achieved, a left pseudoinverse of G can be constructed 
+        # (assuming no causes of degeneracy are found below)
+        best_possible_rank = N_0
     # for notational simplicity later, note the first omega
     omega_1 = omegas_given[0]
     # initialize an empty list of to hold dictionaries for inadmissible frequency values
@@ -522,7 +639,7 @@ def HB_omega_check(omegas_given, make_plots=True):
     for i in range(K):          # i = 0,1,...,K-1
         # current omega
         omega_i = omegas_given[i]
-        # range constraints: the i-th frequency must be stricty less than the 
+        # range constraints: the i-th frequency must be strictly less than the 
         # one that comes after it and strictly greater than the one that comes 
         # before. the first frequency must be strictly greater than zero. 
         # Likewise, the upper bound for the last frequency is infinity.
@@ -541,55 +658,84 @@ def HB_omega_check(omegas_given, make_plots=True):
         case1_max = 0.0
         case2_max = 0.0
         n_multiples = 4             # for Case 1
-        no_of_Ns = 4                # for Case 2
-        if i > 0:
+        no_of_Ns = 3                # for Case 2
+        if i > 0:       # omega_1 is never inadmissible under Case 1
             # find the inadmissible ratios due to Case 1 (when the i-th column
             # ends up being real and, therefore, equals its complex conjugate)
             # run through the first no_of_Ns periods of N
             for m in range(1,n_multiples+1):
                 # compute the inadmissible ratio for this multiple
-                bad_ratio = m*(K+0.5)
-                # compute the inadmissible rank of this multiple
+                #bad_ratio = m*(K+0.5)   # (only applies if N=N_0)
+                bad_ratio = m*N/2.0     # (applied for any N)
+                # number of linearly dependent columns of this multiple
                 if m%2 == 0:            # even m
-                    bad_rank = N-2
+                    rank_degeneracy = 2
+                    bad_case = 'I.B'    # case I degeneracy w/ even m
+                    bad_columns = str(-(i+1))+',0,'+str(i+1)  # record the columns affected
                 else:                   # odd m
-                    bad_rank = N-1
+                    rank_degeneracy = 1
+                    bad_case = 'I.A'    # case I degeneracy w/ odd m
+                    bad_columns = str(-(i+1))+','+str(i+1)  # record the columns affected
+                # compute the resulting inadmissible rank of the matrix
+                if N < N_0:
+                    bad_rank = min(best_possible_rank, N_0-rank_degeneracy)
+                else:
+                    bad_rank = best_possible_rank-rank_degeneracy
                 # compute the corresponding inadmissible value of this omega
                 bad_value = bad_ratio*omega_1
                 # if the inadmissible value occurs within the bounds, record it
-                # as an inadmissible point (bad_value, bad_ratio, bad_rank)
+                # as an inadmissible point (bad_value, bad_ratio, bad_rank, bad_case, bad_columns)
                 if bad_value > lower_bound and bad_value < upper_bound:
-                    inadmissible_points.append((bad_value, bad_ratio, bad_rank))
+                    inadmissible_points.append((bad_value, bad_ratio, bad_rank, bad_case, bad_columns))
                 # record the (inadmissible value, the corresponding bad rank)
                 inadmissible_values_case1.append(bad_value)
             # find the greatest inadmissible value due to Case 1
             case1_max = max(inadmissible_values_case1)
-            # find the inadmissible ratios and values for Case 2 (two arbitrary 
-            # columns in the matrix end up being equal due to N periodicty)
-            test_omegas = list(omegas_given)
-            # remove the current omega from the list and mirror with negation
-            test_omegas.pop(i)
-            test_omegas = [-test_omegas[-i] for i in range(1,K)] + test_omegas
-            # run through the test omegas
-            for test_omega in test_omegas:
-                for r in range(-no_of_Ns,no_of_Ns):
-                    # compute the inadmissible ratio for this combination
-                    bad_ratio = test_omega/omega_1 + r*N
-                    # compute the corresponding inadmissible value
-                    bad_value = bad_ratio*omega_1
-                    # for Case two the rank is alway the same
-                    bad_rank = N-2
-                    # if the inadmissible value occurs within the bounds, record it
-                    # as an inadmissible point (bad_value, bad_ratio, bad_rank)
-                    if bad_value > lower_bound and bad_value < upper_bound:
-                        inadmissible_points.append((bad_value, bad_ratio, bad_rank))
-                    # record the (inadmissible value, the corresponding bad rank)
-                    inadmissible_values_case2.append(bad_value)
-            # find the greatest inadmissible value due to Case 2
-            case2_max = max(inadmissible_values_case2)
+            
+        # find the inadmissible ratios and values for Case 2 (two arbitrary 
+        # columns in the matrix end up being equal due to N periodicty) note
+        # that any omega can be inadmissible under Case 2, including omega_1
+        test_omegas = list(omegas_given)
+        # remove the current omega from the list and mirror with negation
+        test_omegas.pop(i)
+        test_omegas = [-test_omegas[-i] for i in range(1,K)] + test_omegas
+        # run through the test omegas
+        for test_omega in test_omegas:
+            # recover the omega no. (i.e. the column no.) correponding to 
+            # this test omega
+            test_omega_no = int(np.sign(test_omega)*(omegas_given.index(abs(test_omega))+1))
+            bad_columns = str(i+1)+','+ str(test_omega_no)
+            for r in range(-no_of_Ns,no_of_Ns):
+                # compute the inadmissible ratio for this combination
+                bad_ratio = test_omega/omega_1 + r*N
+                # compute the corresponding inadmissible value
+                bad_value = bad_ratio*omega_1
+                # note that it's a case 2 degeneracy and also record which 
+                # columns interact
+                bad_case = 'II'
+                # for Case two the rank degeneracy is always 2
+                rank_degeneracy = 2
+                # the corresponding inadmissible rank is computed as above
+                if N < N_0:
+                    bad_rank = min(best_possible_rank, N_0-rank_degeneracy)
+                else:
+                    bad_rank = best_possible_rank-rank_degeneracy
+                # if the inadmissible value occurs within the bounds, record it
+                # as an inadmissible point (bad_value, bad_ratio, bad_rank, bad_case)
+                if bad_value > lower_bound and bad_value < upper_bound:
+                    inadmissible_points.append((bad_value, bad_ratio, bad_rank, bad_case, bad_columns))
+                # record the (inadmissible value, the corresponding bad rank)
+                inadmissible_values_case2.append(bad_value)
+        # find the greatest inadmissible value due to Case 2
+        case2_max = max(inadmissible_values_case2)
+            
         # for the plotting of the K-th omega, set a "upper bound" that 
-        # corresponds the minimum inadmissible value from both cases
-        K_upper_bound = min(case1_max, case2_max)
+        # corresponds the minimum inadmissible value from both cases. (for
+        # omega_1, case1 doesn't exist, so just use the case 2 max here)
+        if i==0:
+            K_upper_bound = case2_max
+        else:
+            K_upper_bound = min(case1_max, case2_max)
         # for the final omega, discard any inadmissible points which exceed the
         # "upper bound" for K
         inadmissible_points = [point_tuple for point_tuple in inadmissible_points if point_tuple[0] <= K_upper_bound]
@@ -611,26 +757,33 @@ def HB_omega_check(omegas_given, make_plots=True):
         # append this dictionary to the list of omega dictionaries
         omega_dicts.append(omega_dict)    
     # if there are invalid omegas, print their dictionaries to the screen
-    invalid_omegas = []
     omega_counter = 1
+    invalid_omega_counter = 0
     for omega_dict in omega_dicts:
         if not omega_dict['valid']:
-            # set the boolean to return to False
+            # set the boolean to return False and increment the invalid counter
             all_omegas_valid = False
+            invalid_omega_counter += 1
             # print a header
             print('\n\t- OMEGA #'+str(omega_counter)+ ' (' + \
                   str(omega_dict['value']) + ' rad/sec)'+' IS INVALID:')
             # print out the dictionary in a legible manner
             for key in omega_dict:
-                print('\t      - '+(key+': ').ljust(15), end='')
                 if key == 'inadmissible points':
-                    row_names = ['value:  ', 'ratio:  ', 'rank(G):']
-                    for i in range(3):
+                    print('\t      - full column rank: '+str(N_0))
+                    print('\t      - best possible rank: '+str(best_possible_rank))
+                    print('\t      - '+(key+': ').ljust(15), end='')
+                    row_names = ['value:  ', 'ratio:  ', 'rank(G):', 'case:', 'columns:']
+                    for i in range(len(row_names)):
                         print('\n\t\t    '+row_names[i]+'\t', end='')
                         for point in omega_dict[key]:
-                            print(str(round(point[i],3)).center(7), end='')
+                            if not type(point[i]) == str:
+                                print(str(round(point[i],3)).center(10), end='')
+                            else:
+                                print(point[i].center(10), end='')
                     print()
                 else:
+                    print('\t      - '+(key+': ').ljust(15), end='')
                     if not type(omega_dict[key]) == bool:
                         print(str(round(omega_dict[key],3)))
                     else:
@@ -639,11 +792,12 @@ def HB_omega_check(omegas_given, make_plots=True):
         omega_counter += 1
     # print a final warning
     if not all_omegas_valid:
-        if len(invalid_omegas) == 1:
+        if invalid_omega_counter == 1:
             print('\n\t\t\t*** there is an inadmissible angular frequency! ***')
         else:
             print('\n\t\t\t*** there are inadmissible angular frequencies! ***')
-        print('\t\t\t***   (try using Nyquist-based discretization)  ***')
+        if N >= N_0:
+            print('\t\t\t***   (try using Nyquist-based discretization)  ***')
     # if desired, for each of the given angular frequencies, plot the  
     # inadmissible values and the corresponding degenerate rank
     if make_plots:
@@ -747,7 +901,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         - make_movie: animate the convergence process
         - auto_play: automatically open and start playing the movie
         - verbose: print residual convergence history to the screen
-        - optimize_omegas: use time-accurate comparisons, spectral 
+        - optimize_omegas: use time-accurate comparisons, trigonometric 
                            interpolation to define a cost and then use gradient
                            descent in conjunction with analytically computed
                            derivatives of the interpolant to change the values
@@ -911,7 +1065,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
             break
         else:
             # time-march solution at each time instance by one delta_t. let
-            # discrepancy between time-marched point and spectral interpolation
+            # discrepancy between time-marched point and tonal interpolation
             # represent cost. take derivatives of cost w.r.t. each omega.
             # use derivate multiplied by a learning rate to minimize cost using 
             # gradient descent
@@ -920,7 +1074,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 currently_optimizing = True
                 # interpolate the HB solution using the current omegas
                 t_HB_int, f_HB_int, \
-                dfdt_HB_int, a, b = fourierInterp_given_freqs(t_HB, f_HB, omegas,
+                dfdt_HB_int, a, b = trig_interp_given_freqs(t_HB, f_HB, omegas,
                                                               x_int=np.linspace(t_HB[0],2.0*t_HB[-1],t_HB[-1]/delta_t),
                                                               return_coeffs=True)
                 # assume the solution found at each time instance is the 
@@ -1030,14 +1184,14 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                         dfdt_HB_int_stepped_2.append(dfdt_HB_int_stepped_2_i)
                     else:
                         # use linear interpolation to recover the value of the 
-                        # spectral interpolant at the i-th stepped time point
+                        # tonal interpolant at the i-th stepped time point
                         t_stepped_i_point, f_HB_int_stepped_i = linearInterp(t_HB_int, f_HB_int, [t_stepped[i]])
                         # pull the value out of the array
                         f_HB_int_stepped_i = copy.copy(f_HB_int_stepped_i[0])
                         # append to the list
                         f_HB_int_stepped.append(f_HB_int_stepped_i)  
                         # use linear interpolation to recover the value of the time
-                        # derivative of the spectral interpolant at the i-th 
+                        # derivative of the tonal interpolant at the i-th 
                         # stepped time point
                         t_stepped_i_point, dfdt_HB_int_stepped_i = linearInterp(t_HB_int, dfdt_HB_int, [t_stepped[i]])
                         # pull the value out of the array
@@ -1259,8 +1413,8 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
         # plot the final result? (True=animate, False=just print final result)
         animate_plot = make_movie
         plot_name = 'harmonic-balance ODE'
-        n_images = iteration+1                  # total number of images computed
-        skip_images = 100000                 # images to skip between frames
+        n_images = iteration+1          # total number of images computed
+        skip_images = 100               # images to skip between frames
         auto_play = auto_play_movie     # automatically play the movie
         auto_open = auto_open_plot      # automatically open the final image
         # plotting: instantiate the figure
@@ -1300,7 +1454,7 @@ def solve_HB_problem(omegas, time_discretization, the_ode, delta_tau,
                 plt.subplot(1,2,1)
                 plt.cla()
                 plt.plot(t_HB,f_HB_history[n],'mo')
-                t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB_history[n], omegas)
+                t_HB_int, f_HB_int, dummy = trig_interp_given_freqs(t_HB, f_HB_history[n], omegas)
                 plt.plot(t_HB_int, f_HB_int, 'm--')
                 plt.xlabel('$t$', fontsize=16)
                 plt.ylabel('$f_{HB}$', fontsize=16)
@@ -1543,6 +1697,66 @@ def HB_sol_plus_DFT(B, kappa, time_discretization, the_ode, HB_initial_guess,
     ave_f_HB = sum(f_HB)/len(f_HB)
     return n_peaks, peaks_found, peak_ranges, peak_boundaries, ave_f_HB
 #-----------------------------------------------------------------------------#
+def rouche_capelli_check(A, b, verbose=False):
+    '''
+    this function uses the Rouche-Capelli theorem to tell the user how many 
+    solutions exist for the system Ax=b. simply put, if the rank of the matrix
+    A is the same as the rank of the augmented matrix [A|b], then a solution 
+    exists (i.e. the number of solutions is either one or infinity.) if the 
+    rank of A happens to be the same as the number of columns in A, then A has
+    full column rank and if solutions exists (i.e. if rank(A)==rank([A|b]),
+    then there is only one unique solution. note that this means you can have
+    less than full rank and still have a solution to Ax=b.
+    with the HB expansion matrix, this can happen when the function being 
+    sampled exactly contains only those frequencies that have been used to 
+    build up the G matrix. in other words, the function vector, f_HB, is 
+    already in the column space of G -- despite the column space not being 
+    N-dimensional (the column space of G is an r-dimensional subspace within
+    C^N)! 
+    recall, the whole point of solving Gc=f is to find c. c is nothing more 
+    than an expansion of f in the basis provided by the columns of G. so, f_HB 
+    is in the range of G, even though G does not span the space of complex 
+    N-dimensional vectors (C^N). in other words, G has a left nullspace. 
+    because f_HB is already in the column space of G, the augmented matrix 
+    A=[G|f_HB] will have the same rank as G itself. the Rouche-Capelli theorem 
+    states the implications of this observation: a system Ax=b has a solution 
+    iff rank(A)=rank([A|b]). if you have full column rank, then the solution is 
+    unique. otherwise, there is an infinite number of solutions
+    '''
+    # find n, the number of columns
+    (m,n) = np.shape(A)
+    # construct the augmented matrix [A|b]
+    A_augmented = np.hstack((A,b))
+    # run the checks of Rouche-Capelli
+    if verbose:
+        print('\n\n\t\t*** Rouché-Capelli ***')
+    rank_A = my_rank(A)
+    rank_A_augmented = my_rank(A_augmented)
+    if rank_A_augmented==rank_A:
+        if verbose:
+            print('\tA and [A|b] have the same rank:', rank_A)
+        if rank_A==n:
+            if verbose:
+                print('\tA has full column rank!')
+                print('\ttherefore: Ax=b has a unique solution.')
+            N_solutions = 1
+        else:
+            if verbose:
+                print('\tA doesn\'t have full column rank.')
+                print('\ttherefore: Ax=b has an infinite number of solutions.')
+            N_solutions = np.inf
+    else:
+        if verbose:
+            print('\tA and [A|b] have the different rank.')
+            print('\t - rank(A) =', rank_A)
+            print('\t - rank([A|b]) =', rank_A_augmented)
+            print('\ttherefore: Ax=b has no solution!')
+        N_solutions = 0
+    if verbose:
+        print('\t\t*** *** *** *** *** ***\n')
+    # return the number of solutions to Ax=b
+    return N_solutions
+#-----------------------------------------------------------------------------#
 def main():
     '''
     main function, executed when run as a standalone file
@@ -1552,26 +1766,74 @@ def main():
     
     ###############
     # user inputs #
-    ###############
+    ###############    
+    
+    # TESTING Ekici & Hall (AIAA Journal, 2008)
+    # they say to use 3K+1 and the pseudoinverse of G
+    # [REMEMBER to turn on: time_discretization = 'use_T1-'+str(3*K+1)]!!!
+    # pick two random "excitation frequencies"
+    freq_1 = 1.0
+    freq_2 = 8.0
+    # use frequency set specified in Table 1 to build up the operator matrix,
+    # namely: {f1, 2*f1, f2, 2*f2, f1+2f2, f1+f2} (harmonics and "cross terms")
+    # note: Hall's "excitation frequencies" are not the same thing as my
+    #       "actual frequencies." the excitation frequencies are known, 
+    #       mechanical constants. by building up his operator with a set that
+    #       includes harmonics and cross terms, Hall is saying that the actual
+    #       frequencies experienced by the flow are more than just the two
+    #       known forcing frequencies
+    actual_omegas = sorted([freq_1, 2.0*freq_1, freq_2, 2.0*freq_2, freq_1 + 2.0*freq_2, freq_1 + freq_2])
+    #actual_omegas = sorted([freq_1, 2.0*freq_1, freq_2, 2.0*freq_2])
+    
     
     # angular frequencies in the underlying signal
-    actual_omegas = [1.5, 2.5]
-    actual_omegas = [1.5, 3.75]             # 3.75 is inadmissible here!
-    actual_omegas = [1.0, 2.1, 3.6]
-    actual_omegas = [1.0, 2.1, 3.5]         # 3.5 is inadmissible here!
+    actual_omegas = [1.0, 2.5]
+    #actual_omegas = [1.5, 3.75]             # 3.75 is inadmissible here!
+    #actual_omegas = [1.0, 6.0]
+    
+    actual_omegas = [1.0, 2.1, 3.6]         # all freqs admissible
+    
+    #actual_omegas = [1.0, 2.1, 3.5]         # 3.5 is inadmissible here! (2K+1) (rank goes down by 1)(m=1, odd!) (case I.A)
+    #actual_omegas = [1.0, 2.1, 7.0]         # 7.0 is inadmissible here! (2K+1) (rank goes down by 2)(m=2, even!) (case I.B)
+    #actual_omegas = [1.0, 2.1, 4.9]         # 2.1 or 4.9 are inadmissible here! (2K+1) (rank goes down by 2) (case II)
+    #actual_omegas = [1.0, 2.1, 9.1]         # 2.1 or 9.1 are inadmissible here! (2K+1) (rank goes down by 2)
+    #actual_omegas = [1.0, 8.0, 9.1]
+    #actual_omegas = [1.0, 2.1, 6.0]
+    #actual_omegas = [1.0, 7.0, 10.5]        # this set is actually inadmissible under two cases at once! (rank goes down by 3)
+    
+    #actual_omegas = [1.0, 2.1, 4.0]         # 4.0 is inadmissible here! (K+1)
+    
+    #actual_omegas = [1.0, 2.1, 5.0]         # 5.0 is inadmissible here! (3K+1) (rank goes down by 1)(m=1, odd!)
+    #actual_omegas = [1.0, 2.1, 10.0]        # 10.0 is inadmissible here! (3K+1) (rank goes down by 2)(m=2, even!)
+    #actual_omegas = [1.0, 2.1, 7.9]         # 2.1 or 7.9 are inadmissible here! (3K+1) (rank goes down by 2)
+    
+    #actual_omegas = [1.0, 2.1, 5.0]         # 5.0 is inadmissible here! (3K+1 & K+1)
     #actual_omegas = [1.3, 2.1, 3.6, 4.7]
     #actual_omegas = [1.3, 2.1, 3.6, 5.85]   # 5.85 is inadmissble here!
+    #actual_omegas = [1.0, 2.1, 17.5]
+    
+    #actual_omegas = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
+
+    # testing with periodic signals (for UTRC question)    
+    #actual_omegas = [2.5, 5.0, 7.5]     # "fully periodic"
+    #actual_omegas = [2.5, 5.0, 7.5, 10.0]
+    #actual_omegas = [5.0, 7.5]          # "harmonically related"
     
     # angular frequencies input by the user to the HB method
     omegas = copy.copy(actual_omegas)       # use the exact values
+    
+    # quick-'n'-dirty noise study (use to compare errors between Nyquist and T1 under noise)
+    #actual_omegas = [1.0, 2.1, 3.55]    # these are the real freqs
+    #omegas = [1.0, 2.1, 3.5]            # here, we are underestimating the last freq by ~1.41% (these frequencies are also inadmissibe under T1!)
+    
     
     # number of angular frequencies being used
     K = len(omegas)
     
     # select the time discretization to use for specifying the of time instances
     time_discretization = 'use_Nyquist'
-    time_discretization = 'use_Nyquist-random'
-    time_discretization = 'use_Nyquist-'+str(K+1)
+    #time_discretization = 'use_Nyquist-random'
+    #time_discretization = 'use_Nyquist-'+str(K+1)
     #time_discretization = 'use_Nyquist-random-'+str(K+1)
     #time_discretization = 'use_Nyquist-'+str(3*K+1)
     #time_discretization = 'use_Nyquist-random-'+str(3*K+1)
@@ -1582,6 +1844,8 @@ def main():
     #time_discretization = 'use_T1-'+str(3*K+1)
     #time_discretization = 'use_T1-random-'+str(3*K+1)
     
+    #time_discretization = 'use_Nyquist-random-'+str(4*K+1)
+    #time_discretization = 'use_T1-'+str(2*K+2)
     
     ##############################################################
     # define the governing equation based on these actual omegas #
@@ -1593,11 +1857,18 @@ def main():
     ##############################################################################
     # inadmissibiltiy check: are these omegas compatible with T1 discretization? #
     ##############################################################################
-    if time_discretization == 'use_T1' or time_discretization=='use_T1-random':
+    if 'use_T1' in time_discretization:
+        # find the number of time instances being used
+        try:
+            # extract the number of time instances by parsing the string
+            N = int(time_discretization.replace('use_T1','').replace('random','').replace('-',''))
+        except ValueError:
+            # no number has been found in the string, running default case 2K+1
+            N = 2*K+1
         # omega_dicts contains all the constraints on each given angular 
         # frequency, invalid_omegas is a list of tuples containing the number 
         # and value of each inadmissible angular frequency
-        all_omegas_valid = HB_omega_check(omegas)
+        all_omegas_valid = HB_omega_check(omegas, N)
         # if there's an invalid omega, print a warning
         if not all_omegas_valid:
             print('\n\t\t* uh oh! need to change the time discretization! *')
@@ -1622,8 +1893,7 @@ def main():
     
     # create the harmonic balance operator matrix
     print('\n( time_discretization = ', time_discretization,')')
-    D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization, use_pseudoinverse=True)
-    print('t_HB =', t_HB)
+    D_HB, t_HB = harmonic_balance_operator(omegas, time_discretization)
     
     # define an "exact" fine time grid
     T_lowest_omega = 2.0*np.pi/min(omegas)
@@ -1633,7 +1903,11 @@ def main():
     else:
         t = np.linspace(0.0, T_lowest_omega, t_fine_points)
     # find the exact function and function derivative values at the time points
-    f,df = my_non_periodic_fun(t, actual_omegas)
+    f,df = my_non_periodic_fun(t, actual_omegas, verbose=True)
+
+
+
+    # maybe add this to operator function???
 
     # nyquist rate for given omegas (this is a bandlimited signal)
     nyquist_rate = max(omegas)/np.pi    
@@ -1650,15 +1924,17 @@ def main():
         else:
             nyquist_satisfied_for_all = False
             intervals_satisfy_nyquist.append(False)
-    print('nyquist_rate =', nyquist_rate)
-    print('intervals_satisfy_nyquist =', intervals_satisfy_nyquist)
-    print('nyquist_satisfied_for_all =', nyquist_satisfied_for_all)
     
     # create a string with information characterizing the time instances
-    t_HB_info = '('+time_discretization+' instances '
+    if len(t_HB) == 2*K+1:
+        t_HB_info = '('+time_discretization+' - '+str(2*K+1)+' instances '
+    else:        
+        t_HB_info = '('+time_discretization+' instances '
     if nyquist_satisfied_for_all:
         t_HB_info += '-- nyquist_satisfied'
     t_HB_info += ')'
+    
+    
     
     # plot the eigenvalues of the HB operator matrix
     plot_eigenvalues(D_HB, auto_open=False)
@@ -1668,27 +1944,32 @@ def main():
     # multiply by the HB operator matrix 
     df_HB = np.dot(D_HB, f_at_t_HB)
     
+    # set a fontsize for all axes and labels
+    the_fontsize = 18    
+    
     # plot everything
     plot_name = 'HB_operator_check '+t_HB_info
     auto_open = True
-    fourier_interp_HB = all_omegas_valid
-    #fourier_interp_HB = False    
+    trig_interp_HB = all_omegas_valid
+    #trig_interp_HB = False
+    trig_interp_HB = True
     plt.figure(plot_name)
-    plt.plot(t, f, label='$f_{exact}$')
-    plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
-    plt.plot(t_HB, f_at_t_HB, 'ko', label='$f_{HB}$')
-    if fourier_interp_HB:
-        plt.plot(t_HB, df_HB, 'go', label='$df/dt_{HB}$')
-        t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB,omegas,t)
-        plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
+    #plt.plot(t, f, label='$f_{exact}$')
+    plt.plot(t, df, 'r-', label='$df/dt$')
+    #plt.plot(t_HB, f_at_t_HB, 'ko', label='$f_{HB}$')
+    if trig_interp_HB:
+        plt.plot(t_HB, df_HB, 'go', label='$\\dot{\\mathbf{f}}$')
+        t_HB_int, df_HB_int, dummy = trig_interp_given_freqs(t_HB,df_HB,omegas,t)
+        plt.plot(t_HB_int,df_HB_int, 'g--', label='$\\dot{\\mathbf{f}}_{fine}$')
     else:
         plt.plot(t_HB, df_HB, 'go--', label='$df/dt_{HB}$')
         dummy = 1
-    plt.xlabel('$t$', fontsize=16)
-    plt.ylabel('$f(t)$', fontsize=16)
-    plt.legend(loc='best')
-    plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
-              '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=16)
+    plt.xlabel('$t$', fontsize=the_fontsize)
+    plt.ylabel('$\\frac{df}{dt}$', fontsize=the_fontsize)
+    plt.legend(loc='best', fontsize=the_fontsize)
+    plt.tight_layout()
+    #plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
+    #          '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=12)
     # save plot and close
     print('\n\t'+'saving final image...', end='')
     file_name = plot_name+'.png'
@@ -1706,60 +1987,130 @@ def main():
     # again, pull out the exact function values at the time instances
     f_at_t_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
     # construct the the forward "transform" matrix
-    G = HB_expansion_matrix(omegas, time_discretization)
+    G = HB_expansion_matrix(omegas, time_discretization=t_HB)
+    
+    #print('\nG =', G)
+    
+    # get the dimensions of G
+    (m,n) = np.shape(G)
     # check to see if the G matrix is square
-    G_is_square = len(t_HB)==2*K+1
-    # if you can, compute the HB expansion coefficients using the inverse
-    if G_is_square:
-        c_inv = np.dot(np.linalg.inv(G),f_at_t_HB)
-        # reconstruct the function values from the coefficients
-        f_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+    G_is_square = m==n
+    # check to see if G has full rank
+    G_has_full_rank = my_rank(G)==min(m,n)
+    
+    print('\n\tnp.linalg.matrix_rank(G) =', np.linalg.matrix_rank(G))
+    print('\n\tnp.linalg.cond(G) =', np.linalg.cond(G))
+    print('\n\tmy_rank(G) =', my_rank(G))
+    
+    
+    
+    # see how many solution c are possible, using Rouche-Capelli
+    N_c_solutions = rouche_capelli_check(G,f_at_t_HB, verbose=True)
+    print('\tno. of possible c vectors: ', N_c_solutions, '\n\n')
+    
     
     # compute HB expansion coefficients by taking the pseudoinverse of G
-    c_pinv = np.dot(np.linalg.pinv(G),f_at_t_HB)
+    try:
+        c_pinv = np.dot(my_pinv(G), f_at_t_HB)
+        using_approx_G_plus = False
+    except ValueError:
+        print('\n\t G matrix doesn\'t have full rank, using an approximate pseudoinverse...\n')
+        c_pinv = np.dot(my_pinv(G, approximate_using_svd=True), f_at_t_HB)
+        using_approx_G_plus = True
+    print('\nc_pinv =', c_pinv)
+    
+    
+    
+    
+    # *** PUT IN A SEPARATE FUNTION ***
+    # try to predict what the erroneous coefficients will look like under T1
+    if all_omegas_valid:
+        print('\npredictions:')
+        print('\n  CASE I.A:')
+        for i in range(K-1,-1,-1):
+            # just the real part of coeffs corresponding the affected frequency
+            print('\n    -if omega_'+str(K-i)+' affected: c_tilde_-'+str(K-i)+' = c_tilde_'+str(K-i)+' = '+str((1/2)*(c_pinv[i]+c_pinv[-(i+1)]))[1:-1])
+            Im_c_i = np.imag(c_pinv[-(i+1)])
+            case_1A_error = np.sqrt(2.0)*abs(Im_c_i)
+            print('    \t error: ||c-c_tilde||_2 = '+str(case_1A_error)[1:-1])
+        
+        print('\n  CASE I.B:')
+        for i in range(K-1,-1,-1):
+            # one third of the DC coeff plus twice the real part of coeffs 
+            # corresponding the affected frequency
+            print('\n    -if omega_'+str(K-i)+' affected: c_tilde_0 = c_tilde_-'+str(K-i)+' = c_tilde_'+str(K-i)+' = '+str((1/3)*(c_pinv[K]+c_pinv[i]+c_pinv[-(i+1)]))[1:-1])
+            # DC is always real, just getting rid of the imaginary part here
+            c_0 = np.real(c_pinv[K])
+            Re_c_i = np.real(c_pinv[i])
+            case_1B_error = np.sqrt(2.0/3.0)*np.sqrt(c_0**2.0 - 2.0*Re_c_i*(c_0-3.0*Re_c_i) - 3.0*abs(c_pinv[i])**2.0)
+            print('    \t error: ||c-c_tilde||_2 = '+str(case_1B_error)[1:-1])
+
+        print('\n  CASE II:')
+        print('\n      pivot   copied\t\tc~_k" \t\t      error: ||c-c_tilde||_2')
+        print('      -----   ------   ----------------------------   -----------------------')
+        for pivot_col in range(1,K):
+            pivot_col_index = pivot_col+K
+            possible_copied_cols = list(range(pivot_col+1,K+1))
+            possible_copied_columns = [-possible_copied_cols[-i-1] for i in range(len(possible_copied_cols))] + possible_copied_cols
+            for copied_col in possible_copied_columns:
+                copied_col_index = copied_col+K
+                c_tilde_k_double_prime = 0.5*(c_pinv[pivot_col_index]+c_pinv[copied_col_index])
+                case_2_error = np.sqrt(abs(c_pinv[pivot_col_index])**2 + \
+                                abs(c_pinv[copied_col_index])**2 - \
+                                2*(np.real(c_pinv[pivot_col_index])*np.real(c_pinv[copied_col_index]) + \
+                                np.imag(c_pinv[pivot_col_index])*np.imag(c_pinv[copied_col_index])))
+                
+                if np.sign(copied_col) == 1:
+                    print('\t'+str(pivot_col)+'\t '+str(copied_col)+'\t'+str(c_tilde_k_double_prime)[1:-1]+'\t\t   '+str(case_2_error)[1:-1])
+                else:
+                    print('\t'+str(pivot_col)+'\t'+str(copied_col)+'\t'+str(c_tilde_k_double_prime)[1:-1]+'\t\t   '+str(case_2_error)[1:-1])
+
+
+
+
+
     # reconstruct the function values from the coefficients
     f_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
+    #print('\nf_expansion_at_t_HB_pinv =',f_expansion_at_t_HB_pinv)
     
-    # create a set of omegas that's a noisy version of the actual omegas
-    # let noise be <10% of the actual values
-    noises = 0.10*np.array(actual_omegas)*(np.random.rand(len(actual_omegas))-0.5)
-    noisy_omegas = list(np.array(actual_omegas) + noises)
-    # compute an "exact" function containing only these noisy omegas
-    f_noisy, dummy = my_non_periodic_fun(t, noisy_omegas)
-
-    # pull out the exact noisy-function values at the time instances
-    f_noisy_at_t_HB, dummy = my_non_periodic_fun(t_HB, noisy_omegas)
-    # compute HB expansion coefficients by inverting G (with assumed omegas)
-    if G_is_square:
-        c_inv = np.dot(np.linalg.inv(G),f_noisy_at_t_HB)
+    # if you can, compute the HB expansion coefficients using the inverse too
+    if G_is_square and G_has_full_rank:
+        c_inv = np.dot(my_inv(G),f_at_t_HB)
+        print('\nc_inv =', c_inv)
         # reconstruct the function values from the coefficients
-        f_noisy_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+        f_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))
+        #print('\nf_expansion_at_t_HB_inv =',f_expansion_at_t_HB_inv)
+        # c_inv should be the same as c_pinv here. make sure it is!
+        if np.linalg.norm(c_pinv-c_inv) < 1e-10:
+            print('\n\t c_inv = c_pinv \t ... \t because G is invertible: good.\n')
     
-    # compute HB expansion coefficients by taking the pseudoinverse of G
-    c_pinv = np.dot(np.linalg.pinv(G),f_noisy_at_t_HB)
-    # reconstruct the function values from the coefficients
-    f_noisy_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
+    # see if the exact noisy signal can be recovered using an 
+    # interpolation scheme built up from the assumed frequencies
+    # see how many solution c are possible, using Rouche-Capelli
+    G_fine = HB_expansion_matrix(omegas, time_discretization=t)
+    N_c_solutions = rouche_capelli_check(G_fine, f, verbose=True)
+    print('\tno. of possible c vectors for the interpolation: ', N_c_solutions, '\n\n')
     
     # plot everything
     plot_name = 'HB_expansion_check '+t_HB_info
-    auto_open = True
+    auto_open = False
     if time_discretization == 'use_T1' and not all_omegas_valid:
-        fourier_interp_HB = False
+        trig_interp_HB = False
     else:
-        fourier_interp_HB = True
+        trig_interp_HB = True
     plt.figure(plot_name)
     plt.plot(t, f, 'k', label='$f_{exact}$')
     plt.plot(t_HB, f_at_t_HB, 'ko')    
-    if G_is_square:
+    if G_is_square and G_has_full_rank:
         plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*', label='$f_{expansion, inv}$')
-        if fourier_interp_HB:
-            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
-            plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        if trig_interp_HB:
+            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = trig_interp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
+            plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$tonal\,\,interp.$')
         else:        
             plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*--')
     plt.plot(t_HB, f_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion, pinv}$')
-    t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
-    plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
+    t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = trig_interp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
+    plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$tonal\,\,interp.$')
     plt.xlabel('$t$', fontsize=14)
     plt.ylabel('$f(t)$', fontsize=14)
     plt.legend(loc='best')
@@ -1775,26 +2126,28 @@ def main():
     if auto_open:
         webbrowser.open(file_name)
     
-    # if fourier_interp_HB has been turned off, turn it back on and plot again
-    if not fourier_interp_HB:
+    # if trig_interp_HB has been turned off, turn it back on and plot again
+    trig_interp_HB = False
+    if not trig_interp_HB:
         # plot everything
-        plot_name = 'HB_expansion_check-with_fourier_interp '+t_HB_info
+        plot_name = 'HB_expansion_check-with_trig_interp '+t_HB_info
         auto_open = True
         plt.figure(plot_name)
-        plt.plot(t, f, 'k', label='$f_{exact}$')
-        plt.plot(t_HB, f_at_t_HB, 'ko')
-        if G_is_square:
-            plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*', label='$f_{expansion, inv}$')
-            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
-            plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
-        plt.plot(t_HB, f_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion, pinv}$')
-        t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
-        plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
-        plt.xlabel('$t$', fontsize=14)
-        plt.ylabel('$f(t)$', fontsize=14)
-        plt.legend(loc='best')
-        plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
-                  '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+        plt.plot(t, f, 'k-', label='$f$')
+        plt.plot(t_HB, f_at_t_HB, 'go', label='$\\mathbf{f}$')
+        if G_is_square and G_has_full_rank:
+            #plt.plot(t_HB, f_expansion_at_t_HB_inv, 'r*', label='$f_{expansion, inv}$')
+            t_HB_int, f_expansion_at_t_HB_inv_int, dummy = trig_interp_given_freqs(t_HB,f_expansion_at_t_HB_inv,omegas,t)
+            #plt.plot(t_HB_int,f_expansion_at_t_HB_inv_int, 'r--', label='$tonal\,\,interp.$')
+        #plt.plot(t_HB, f_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion, pinv}$')
+        t_HB_int, f_expansion_at_t_HB_pinv_int, dummy = trig_interp_given_freqs(t_HB,f_expansion_at_t_HB_pinv,omegas,t)
+        plt.plot(t_HB_int,f_expansion_at_t_HB_pinv_int, 'g-.', label='$\\mathbf{f}_{fine}$')
+        plt.xlabel('$t$', fontsize=the_fontsize)
+        plt.ylabel('$f(t)$', fontsize=the_fontsize)
+        plt.legend(loc='best', fontsize=the_fontsize)
+        plt.tight_layout()
+        #plt.title('$\omega_{actual} = \{' + str(actual_omegas)[1:-1] + \
+        #          '\} \quad\quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
         # save plot and close
         print('\n\t'+'saving final image...', end='')
         file_name = plot_name+'.png'
@@ -1805,26 +2158,198 @@ def main():
         if auto_open:
             webbrowser.open(file_name)
     
-    # plot everything
-    plot_name = 'HB_expansion_check + noise '+t_HB_info
-    auto_open = True
-    if time_discretization == 'use_T1' and not all_omegas_valid:
-        fourier_interp_HB = False
+    
+    # compute the sensitivity of the expansion and the derivative to noise
+    print('\n\tevaluating noise percentages', end='')
+    percent_noises = np.linspace(0.0, 40.0)
+    trials_per_percentage = 50
+    average_expansion_residuals = []
+    average_fine_expansion_residuals = []
+    average_derivative_residuals = []
+    average_fine_derivative_residuals = []
+    # HB interpolation matrix (HB expansion matrix built w/the fine time grid)
+    G_fine = HB_expansion_matrix(omegas, time_discretization=t)
+    # diagonal frequency matrix (used while computing the fine-grid derivative)
+    w = [-omegas[-(i+1)] for i in range(len(omegas))]+[0.0]+omegas
+    w_imag = [1j*w_i for w_i in w]
+    Omega = np.diag(w_imag)
+
+    # specify which norm to use for the residual computation (p=1,2,...,np.inf) **************
+    p = 2
+    # plot on log-log axes?
+    use_loglog_axes = False
+    
+    for noise_percentage in percent_noises:
+        if noise_percentage/max(percent_noises) % 0.1 < 1e-2:
+            print('.', end='')
+        expansion_residuals = []
+        derivative_residuals = []
+        fine_expansion_residuals = []
+        fine_derivative_residuals = []
+        for _ in range(trials_per_percentage):
+            
+            # create a set of omegas that's a noisy version of the actual omegas
+            # let noise be <(noise_percentage)% of the actual values
+            noises = (noise_percentage/100.0)*np.array(actual_omegas)*(np.random.rand(len(actual_omegas))-0.5)
+            noisy_omegas = list(np.array(actual_omegas) + noises)
+            
+            # "exact" / "fine-grid" function containing only these noisy omegas
+            f_noisy, df_noisy = my_non_periodic_fun(t, noisy_omegas)
+            
+            # pull out the exact noisy-function values at the time instances
+            f_noisy_at_t_HB, df_noisy_at_t_HB = my_non_periodic_fun(t_HB, noisy_omegas)
+            
+            # compute HB expansion coefficients by taking the pseudoinverse of G
+            try:
+                c_pinv = np.dot(my_pinv(G), f_noisy_at_t_HB)
+                using_approx_G_plus = False
+            except ValueError:
+                #print('\n\t G matrix doesn\'t have full rank, using an approximate pseudoinverse...\n')
+                c_pinv = np.dot(my_pinv(G, approximate_using_svd=True), f_noisy_at_t_HB)
+                using_approx_G_plus = True
+            
+            # reconstruct the function values at t_HB from the coefficients
+            f_noisy_expansion_at_t_HB_pinv = np.real(np.dot(G,c_pinv))
+            
+            # if you can, compute the HB expansion coefficients using the inverse
+            if G_is_square and G_has_full_rank:
+                c_inv = np.dot(my_inv(G),f_noisy_at_t_HB)
+                f_noisy_expansion_at_t_HB_inv = np.real(np.dot(G,c_inv))            
+            
+            # compute a measure of the discrepancy between the samples and the
+            # reconstruction at the time instances
+            expansion_residual = f_noisy_expansion_at_t_HB_pinv - f_noisy_at_t_HB
+            norm_expansion_residual = np.linalg.norm(expansion_residual.squeeze(),ord=p)
+            expansion_residuals.append(norm_expansion_residual)
+            
+            # try reconstructing the function on the fine grid from the coeffs
+            # (yes, this will be the same as the above line at the t_HB)
+            f_noisy_expansion_fine = np.real(np.dot(G_fine,c_pinv))
+            
+            # compute a measure of the discrepancy between the fine-grid
+            # reconstruction and the exact noisy signal
+            fine_expansion_residual = f_noisy_expansion_fine - f_noisy
+            norm_fine_expansion_residual = np.linalg.norm(fine_expansion_residual.squeeze(),ord=p)
+            fine_expansion_residuals.append(norm_fine_expansion_residual)
+            
+            # compute the derivative at the time instances using the HB operator
+            df_noisy_HB = np.dot(D_HB, f_noisy_at_t_HB)
+            df_noisy_HB = np.real(np.dot(G,np.dot(Omega, c_pinv)))
+            
+            # compute a measure of the discrepancy between the sampled 
+            # derivatives and the HB derivatives at the time instances
+            derivative_residual = df_noisy_HB - df_noisy_at_t_HB
+            norm_derivative_residual = np.linalg.norm(derivative_residual.squeeze(),ord=p)
+            derivative_residuals.append(norm_derivative_residual)
+            
+            # try reconstructing the derivative on the fine grid from the
+            # coeffs
+            df_noisy_fine = np.real(np.dot(G_fine,np.dot(Omega, c_pinv)))
+            
+            # compute a measure of the discrepancy between the fine-grid
+            # derivative and the exact noisy derivative
+            fine_derivative_residual = df_noisy_fine - df_noisy
+            norm_fine_derivative_residual = np.linalg.norm(fine_derivative_residual.squeeze(),ord=p)
+            fine_derivative_residuals.append(norm_fine_derivative_residual)
+            
+        # compute & store the average residual norms found for this noise level
+        average_expansion_residual = sum(expansion_residuals)/trials_per_percentage
+        average_expansion_residuals.append(average_expansion_residual)
+        average_fine_expansion_residual = sum(fine_expansion_residuals)/trials_per_percentage
+        average_fine_expansion_residuals.append(average_fine_expansion_residual)
+        average_derivative_residual = sum(derivative_residuals)/trials_per_percentage
+        average_derivative_residuals.append(average_derivative_residual)
+        average_fine_derivative_residual = sum(fine_derivative_residuals)/trials_per_percentage
+        average_fine_derivative_residuals.append(average_fine_derivative_residual)
+    # close off the monitor
+    print('done!\n')
+    
+    # at the last trial for the last noise level, check rouche-capelli
+    print('\n\n - for the '+str(trials_per_percentage)+'-th trial with noise of: ', round(noise_percentage,3), '%:')
+    # see if the noisy signal, sampled at the HB points, can be expanded in the
+    # columns of the HB expansion matrix, using Rouche-Capelli
+    print('\n  - for the extrapolation coefficients:')
+    N_c_solutions = rouche_capelli_check(G, f_noisy_at_t_HB, verbose=True)
+    print('\t    no. of exact c vectors for the HB expansion: ', N_c_solutions)
+    
+    # see if the exact noisy signal can be recovered using an 
+    # interpolation scheme built up from the assumed frequencies
+    # see how many solution c are possible, using Rouche-Capelli
+    print('\n  - for the interpolation coefficients:')
+    G_fine = HB_expansion_matrix(omegas, time_discretization=t)
+    N_c_solutions = rouche_capelli_check(G_fine, f_noisy, verbose=True)
+    print('\t    no. of exact c vectors for the interpolation: ', N_c_solutions, '\n\n')
+    
+    # plot sensitivity of the expansion and the derivative to noisy omegas
+    plot_name = 'HB_noise_sensitivity '+t_HB_info
+    auto_open = False
+    plt.figure(plot_name)
+    if using_approx_G_plus:
+        expansion_label = '$f|_{HB}-G\\tilde{G}^+ f_{HB}$'
+        fine_expansion_label = '$f-G_{fine}\\tilde{G}^+ f_{HB}$'
+        derivative_label = '$\\frac{\partial f}{\partial t}|_{HB}-G \Omega \\tilde{G}^+ f_{HB}$'
+        fine_derivative_label = '$\\frac{\partial f}{\partial t}-G_{fine} \Omega \\tilde{G}^+ f_{HB}$'
     else:
-        fourier_interp_HB = True
+        expansion_label = '$f|_{HB}-GG^+ f_{HB}$'
+        fine_expansion_label = '$f-G_{fine}G^+ f_{HB}$'
+        derivative_label = '$\\frac{\partial f}{\partial t}|_{HB}-G \Omega G^+ f_{HB}$'
+        fine_derivative_label = '$\\frac{\partial f}{\partial t}-G_{fine} \Omega G^+ f_{HB}$'
+    if use_loglog_axes:
+        plt.loglog(percent_noises, average_expansion_residuals, 'b.-', label=expansion_label)
+        plt.loglog(percent_noises, average_fine_expansion_residuals, 'c.-', label=fine_expansion_label)
+        plt.loglog(percent_noises, average_derivative_residuals, 'r.-', label=derivative_label)
+        plt.loglog(percent_noises, average_fine_derivative_residuals, 'm.-', label=fine_derivative_label)
+    else:
+        plt.semilogy(percent_noises, average_expansion_residuals, 'b.-', label=expansion_label)
+        plt.semilogy(percent_noises, average_fine_expansion_residuals, 'c.-', label=fine_expansion_label)
+        plt.semilogy(percent_noises, average_derivative_residuals, 'r.-', label=derivative_label)
+        plt.semilogy(percent_noises, average_fine_derivative_residuals, 'm.-', label=fine_derivative_label)
+    
+    plt.xlabel('$\% \,noise \; present \; in \; each \; actual \; \omega_i$', fontsize=14)
+    if p == np.inf:
+        p_string = '\infty'
+    else:
+        p_string = str(p)
+    plt.ylabel('$\overline{\|residual\|_{'+p_string+'}}$', fontsize=14)
+    plt.ylim(1e-14,1e5)
+    plt.legend(loc='best')
+    plt.title('$\omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+        
+    # plot everything
+    plot_name = 'noisy_HB_expansion_check '+t_HB_info
+    auto_open = False
+    if time_discretization == 'use_T1' and not all_omegas_valid:
+        trig_interp_HB = False
+    else:
+        trig_interp_HB = True
     plt.figure(plot_name)
     plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
     plt.plot(t_HB, f_noisy_at_t_HB, 'ko')    
-    if G_is_square:
+    if G_is_square and G_has_full_rank:
         plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
-        if fourier_interp_HB:
-            t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
-            plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')
+        if trig_interp_HB:
+            #t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = trig_interp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+            #plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$tonal\,\,interp.$')
+            plt.plot(t,f_noisy_expansion_fine, 'r--', label='$tonal\,\,interp.$')
         else:
             plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*--')
-    plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
-    t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
-    plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
+    if trig_interp_HB:
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
+        #t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = trig_interp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
+        #plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$tonal\,\,interp.$')
+        plt.plot(t,f_noisy_expansion_fine, 'g-.', label='$tonal\,\,interp.$')
+    else:
+        plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*--', label='$f_{expansion,pinv}$')
+        
     plt.xlabel('$t$', fontsize=14)
     plt.ylabel('$f(t)$', fontsize=14)
     plt.legend(loc='best')
@@ -1841,21 +2366,21 @@ def main():
     if auto_open:
         webbrowser.open(file_name)
     
-    # if fourier_interp_HB has been turned off, turn it back on and plot again
-    if not fourier_interp_HB:
+    # if trig_interp_HB has been turned off, turn it back on and plot again
+    if not trig_interp_HB:
         # plot everything
-        plot_name = 'HB_expansion_check + noise-with_fourier_interp '+t_HB_info
+        plot_name = 'HB_expansion_check + noise-with_trig_interp '+t_HB_info
         auto_open = True
         plt.figure(plot_name)
         plt.plot(t, f_noisy, 'k', label='$f_{exact}$')
         plt.plot(t_HB, f_noisy_at_t_HB, 'ko')
-        if G_is_square:
+        if G_is_square and G_has_full_rank:
             plt.plot(t_HB, f_noisy_expansion_at_t_HB_inv, 'r*', label='$f_{expansion,inv}$')
-            t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
-            plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$spectral\,\,interp.$')        
+            t_HB_int, f_noisy_expansion_at_t_HB_inv_int, dummy = trig_interp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_inv, omegas,t)
+            plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_inv_int, 'r--', label='$tonal\,\,interp.$')        
         plt.plot(t_HB, f_noisy_expansion_at_t_HB_pinv, 'g*', label='$f_{expansion,pinv}$')
-        t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = fourierInterp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
-        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$spectral\,\,interp.$')
+        t_HB_int, f_noisy_expansion_at_t_HB_pinv_int, dummy = trig_interp_given_freqs(t_HB,f_noisy_expansion_at_t_HB_pinv, omegas,t)
+        plt.plot(t_HB_int,f_noisy_expansion_at_t_HB_pinv_int, 'g-.', label='$tonal\,\,interp.$')
         plt.xlabel('$t$', fontsize=14)
         plt.ylabel('$f(t)$', fontsize=14)
         plt.legend(loc='best')
@@ -1872,6 +2397,67 @@ def main():
         if auto_open:
             webbrowser.open(file_name)
     
+    # noisy derivative check
+    plot_name = 'noisy_HB_operator_check '+t_HB_info
+    auto_open = False
+    trig_interp_HB = all_omegas_valid    
+    plt.figure(plot_name)
+    plt.plot(t, f_noisy, label='$f_{exact}$')
+    plt.plot(t, df_noisy, 'r-', label='$df/dt_{exact}$')
+    plt.plot(t_HB, f_noisy_at_t_HB, 'ko', label='$f_{HB}$')
+    if trig_interp_HB:
+        plt.plot(t_HB, df_noisy_HB, 'go', label='$df/dt_{HB}$')
+        #t_HB_int, df_noisy_HB_int, dummy = trig_interp_given_freqs(t_HB,df_noisy_HB,omegas,t)
+        #plt.plot(t_HB_int,df_noisy_HB_int, 'g--', label='$tonal\,\,interp.$')
+        plt.plot(t,df_noisy_fine, 'g--', label='$tonal\,\,interp.$')
+    else:
+        plt.plot(t_HB, df_noisy_HB, 'go--', label='$df/dt_{HB}$')
+        dummy = 1
+    plt.xlabel('$t$', fontsize=16)
+    plt.ylabel('$f(t)$', fontsize=16)
+    plt.legend(loc='best')
+    rounded_noisy_omegas = [float('{0:.4g}'.format(omega)) for omega in noisy_omegas]
+    plt.title('$\omega_{actual} = \{' + str(rounded_noisy_omegas)[1:-1] + \
+                  '\} \quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+    # save plot and close
+    print('\n\t'+'saving final image...', end='')
+    file_name = plot_name+'.png'
+    plt.savefig(file_name, dpi=300)
+    print('figure saved: '+plot_name)
+    plt.close(plot_name)
+    # open the saved image, if desired
+    if auto_open:
+        webbrowser.open(file_name)
+    
+    # if trig_interp_HB has been turned off, turn it back on and plot again
+    # remember, "fourier interp" is just evaluation on a fine grid
+    if not trig_interp_HB:
+        # replot the noisy operator check, but with Fourier interpolation
+        plot_name = 'noisy_HB_operator_check -with_trig_interp '+t_HB_info
+        auto_open = False
+        plt.figure(plot_name)
+        plt.plot(t, f_noisy, label='$f_{exact}$')
+        plt.plot(t, df_noisy, 'r-', label='$df/dt_{exact}$')
+        plt.plot(t_HB, f_noisy_at_t_HB, 'ko', label='$f_{HB}$')
+        plt.plot(t_HB, df_noisy_HB, 'go', label='$df/dt_{HB}$')
+        plt.plot(t,df_noisy_fine, 'g--', label='$tonal\,\,interp.$')
+        plt.xlabel('$t$', fontsize=16)
+        plt.ylabel('$f(t)$', fontsize=16)
+        plt.legend(loc='best')
+        rounded_noisy_omegas = [float('{0:.4g}'.format(omega)) for omega in noisy_omegas]
+        plt.title('$\omega_{actual} = \{' + str(rounded_noisy_omegas)[1:-1] + \
+                      '\} \quad \omega_{used} = \{'+str(omegas)[1:-1]+'\}$', fontsize=14)
+        # save plot and close
+        print('\n\t'+'saving final image...', end='')
+        file_name = plot_name+'.png'
+        plt.savefig(file_name, dpi=300)
+        print('figure saved: '+plot_name)
+        plt.close(plot_name)
+        # open the saved image, if desired
+        if auto_open:
+            webbrowser.open(file_name)
+        
+        
     ############################################################################
     # See how the error in the derivatives changes if the freqs used are wrong #
     ############################################################################
@@ -1894,7 +2480,7 @@ def main():
         D_HB, t_HB_actual = harmonic_balance_operator(actual_omegas, time_discretization)
         f_HB_actual, dummy = my_non_periodic_fun(t_HB, actual_omegas)
         df_HB = np.dot(D_HB, f_HB_actual)
-        t_HB_int_actual, df_HB_int_actual, dummy = fourierInterp_given_freqs(t_HB, df_HB, actual_omegas)
+        t_HB_int_actual, df_HB_int_actual, dummy = trig_interp_given_freqs(t_HB, df_HB, actual_omegas)
         # loop through the various errors to try
         for error_percentage in percent_errors:
             # set the wrong angular frequencies
@@ -1903,7 +2489,7 @@ def main():
             D_HB, t_HB = harmonic_balance_operator(trial_omegas, time_discretization)
             f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
             df_HB = np.dot(D_HB, f_HB)
-            t_HB_int_wrong, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,trial_omegas)
+            t_HB_int_wrong, df_HB_int_wrong, dummy = trig_interp_given_freqs(t_HB,df_HB,trial_omegas)
             # compute error of incorrect solution, using values at interpolation points
             if error_measure == 'f-difference':
                 # just just the error in df
@@ -1946,7 +2532,7 @@ def main():
         D_HB, t_HB = harmonic_balance_operator(max_omegas, time_discretization)
         f_HB, dummy = my_non_periodic_fun(t_HB, actual_omegas)
         df_HB_wrong = np.dot(D_HB, f_HB)
-        t_HB_int, df_HB_int_wrong, dummy = fourierInterp_given_freqs(t_HB,df_HB,max_omegas)
+        t_HB_int, df_HB_int_wrong, dummy = trig_interp_given_freqs(t_HB,df_HB,max_omegas)
         
         # plot the correct derivative and the worst answer studied
         plot_name = 'result_at_worst_answer'
@@ -1956,8 +2542,8 @@ def main():
         plt.plot(t_HB_actual, f_HB_actual, 'ko', label='$f_{HB}$')
         plt.plot(t, df, 'r-', label='$df/dt_{exact}$')
         plt.plot(t_HB, df_HB_wrong, 'go', label='$df/dt_{HB,wrong}$')
-        t_HB_int, df_HB_int, dummy = fourierInterp_given_freqs(t_HB,df_HB_wrong,max_omegas)
-        plt.plot(t_HB_int,df_HB_int, 'g--', label='$spectral\,\,interp.$')
+        t_HB_int, df_HB_int, dummy = trig_interp_given_freqs(t_HB,df_HB_wrong,max_omegas)
+        plt.plot(t_HB_int,df_HB_int, 'g--', label='$tonal\,\,interp.$')
         plt.xlabel('$t$', fontsize=16)
         plt.ylabel('$f(t)$', fontsize=16)
         plt.legend(loc='best')
@@ -1973,36 +2559,40 @@ def main():
             webbrowser.open(file_name)
         
     #############################################################################
-    # See how cond(D_HB) and cond(E_inv) vary with selected angular frequencies #
+    # See how cond(D_HB) and cond(G) vary with selected angular frequencies #
     #############################################################################
     first_omega = omegas[0]
-    starting_multiple = first_omega
+    starting_multiple = 1
     penultimate_omega = omegas[-2]
-    #penultimate_multiple = penultimate_omega/first_omega
+    penultimate_multiple = penultimate_omega/first_omega
     nondim_penultimate_omega = 2.0*(penultimate_omega-first_omega)/(penultimate_omega+first_omega)
     max_multiple = 25.0
-    multiples = myLinspace(starting_multiple, max_multiple, 50*int(max_multiple-starting_multiple)+1)
+    multiples = myLinspace(starting_multiple, max_multiple, 100*int(max_multiple-starting_multiple)+1)
     plot_nondim_omegas = False
+    plot_outliers_in_title = False
+    fully_periodic_signal = False    # omegas includes fundamental and consecutive multiples
     
     # print message to the screen
-    print('\nstudying the effect of different frequencies pairs on cond(D_HB) and cond(E_inv)...')
+    print('\nstudying the effect of different frequencies pairs on cond(D_HB) and cond(G)...')
     D_conds = []
-    E_inv_conds = []
+    G_conds = []
     average_errors = []
     nondim_omegas = []
     for multiple in multiples:
         # omegas
         final_omega = first_omega*multiple
         freqs = [first_omega]+omegas[1:-1]+[final_omega]
+        print('\n----')
+        print('freqs =', freqs)
         nondim_omegas.append(2.0*(final_omega-first_omega)/(final_omega+first_omega))
-        # operator    
+        # operator
         D_HB, t_HB = harmonic_balance_operator(freqs, time_discretization)
         current_D_cond = np.linalg.cond(D_HB)
         D_conds.append(current_D_cond)
         # E inverse
-        E_inv = HB_expansion_matrix(freqs, time_discretization)
-        current_E_inv_cond = np.linalg.cond(E_inv)
-        E_inv_conds.append(current_E_inv_cond)
+        G = HB_expansion_matrix(freqs, time_discretization)
+        current_G_cond = np.linalg.cond(G)
+        G_conds.append(current_G_cond)
         # create a model function using the current pair of freqs and sample this
         # function at the HB time instances
         f_HB, df_exact = my_non_periodic_fun(t_HB, freqs)
@@ -2017,9 +2607,9 @@ def main():
     D_stdevs_cutoff = 0.0001
     D_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
     D_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(D_conds)) if D_conds[i] > np.average(D_conds)+D_stdevs_cutoff*np.std(D_conds)]
-    E_inv_cutoff = 1e12
-    E_inv_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
-    #E_inv_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(E_inv_conds)) if E_inv_conds[i] > E_inv_cutoff]
+    G_cutoff = 1e12
+    G_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(G_conds)) if G_conds[i] > G_cutoff]
+    G_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(G_conds)) if G_conds[i] > G_cutoff]
     df_percent_tol = 1e-5
     df_error_peaks = [float("{0:.3f}".format(multiples[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
     df_error_nondim_peaks = [float("{0:.3f}".format(nondim_omegas[i])) for i in range(len(average_errors)) if average_errors[i] > df_percent_tol]
@@ -2032,14 +2622,16 @@ def main():
         plt.semilogy(nondim_omegas, D_conds, 'k.-')
         plt.semilogy([nondim_penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
         plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
-        plt.title('$outliers \,\, at: \,\, '+str(D_nondim_peaks)[1:-1]+'$', fontsize=8)
+        if plot_outliers_in_title:
+            plt.title('$outliers \,\, at: \,\, '+str(D_nondim_peaks)[1:-1]+'$', fontsize=8)
     else:
         plt.semilogy(multiples, D_conds, 'k.-')
-        plt.semilogy([penultimate_omega]*2,[min(D_conds),max(D_conds)],'y--')
+        plt.semilogy([penultimate_multiple]*2,[min(D_conds),max(D_conds)],'y--')
         plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-        plt.title('$outliers \,\, at: \,\, '+str(D_peaks)[1:-1]+'$', fontsize=8)
+        if plot_outliers_in_title:
+            plt.title('$outliers \,\, at: \,\, '+str(D_peaks)[1:-1]+'$', fontsize=8)
     plt.ylabel('$\kappa(D_{HB})$', fontsize=16)
-    #plt.tight_layout()
+    plt.tight_layout()
     # save plot and close
     print('\n\t'+'saving final image...', end='')
     file_name = plot_name+'.png'
@@ -2050,23 +2642,31 @@ def main():
     if auto_open:
         webbrowser.open(file_name)
         
-    # plot the E_inv result
-    plot_name = 'cond(E_inv)_vs_freq_ratio'
+    # plot the G result
+    plot_name = 'cond(G)_vs_freq_ratio'
     auto_open = False
     plt.figure(plot_name)
     if plot_nondim_omegas:
-        plt.semilogy(nondim_omegas, E_inv_conds, 'k.-')
-        plt.semilogy([nondim_penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
-        plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=14)
-        #plt.title('$outliers \,\, at: \,\, '+str(E_inv_nondim_peaks)[1:-1]+'$', fontsize=6)
+        plt.semilogy(nondim_omegas, G_conds, 'k.-')
+        plt.semilogy([nondim_penultimate_omega]*2,[min(G_conds),max(G_conds)],'y--')
+        plt.xlabel('$\delta^*_{\omega_K}=2\,\\frac{\omega_K-\omega_1}{\omega_K+\omega_1}$', fontsize=the_fontsize)
+        if plot_outliers_in_title:
+            plt.title('$outliers \,\, at: \,\, '+str(G_nondim_peaks)[1:-1]+'$', fontsize=6)
         plt.ylim(1,100)
+        #plt.ylim(1,10000)
     else:
-        plt.semilogy(multiples, E_inv_conds, 'k.-')
-        plt.semilogy([penultimate_omega]*2,[min(E_inv_conds),max(E_inv_conds)],'y--')
-        plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-        plt.title('$outliers \,\, at: \,\, '+str(E_inv_peaks)[1:-1]+'$', fontsize=6)
-    plt.ylabel('$\kappa(F^{-1})$', fontsize=14)
-    #plt.tight_layout()
+        plt.semilogy(multiples, G_conds, 'k.-')
+        plt.semilogy([penultimate_multiple]*2,[min(G_conds),max(G_conds)],'y--')
+        if fully_periodic_signal:
+            cond_at_K = np.interp(K,multiples, G_conds)
+            plt.semilogy(K, cond_at_K,'co', label='$fully\; periodic$')
+            plt.legend(loc='best')
+        plt.xlabel('$\omega_{'+str(K)+'}/\omega_1$', fontsize=the_fontsize)
+        plt.xlabel('$\omega_K/\omega_1$', fontsize=the_fontsize)
+        if plot_outliers_in_title:
+            plt.title('$outliers \,\, at: \,\, '+str(G_peaks)[1:-1]+'$', fontsize=6)
+    plt.ylabel('$\kappa\\left(\\mathbf{G}\\right)$', fontsize=the_fontsize)
+    plt.tight_layout()
     # save plot and close
     print('\n\t'+'saving final image...', end='')
     file_name = plot_name+'.png'
@@ -2089,11 +2689,15 @@ def main():
         plt.semilogy(nondim_omegas,[df_percent_tol]*len(nondim_omegas),'r--')
     else:
         plt.semilogy(multiples, average_errors, 'k.-')
-        plt.semilogy([penultimate_omega]*2,[min(average_errors),max(average_errors)],'y--')
-        plt.xlabel('$\omega_K/\omega_1$', fontsize=14)
-        plt.title('$outliers \,\, at: \,\, '+str(df_error_peaks)[1:-1]+'$', fontsize=7)
-        plt.semilogy(multiples,[df_percent_tol]*len(multiples),'r--')
-    plt.ylabel('$\% \,\, error \,\, in \,\, f_{,t_{HB}}$', fontsize=14)
+        plt.semilogy([penultimate_multiple]*2,[min(average_errors),max(average_errors)],'y--')
+        if fully_periodic_signal:
+            plt.semilogy([K]*2,[min(average_errors),max(average_errors)],'c--')        
+        plt.xlabel('$\omega_{'+str(K)+'}/\omega_1$', fontsize=the_fontsize)
+        #plt.xlabel('$\omega_K/\omega_1$', fontsize=the_fontsize)
+        if plot_outliers_in_title:
+            plt.title('$outliers \,\, at: \,\, '+str(df_error_peaks)[1:-1]+'$', fontsize=7)
+            plt.semilogy(multiples,[df_percent_tol]*len(multiples),'r--')
+    plt.ylabel('$\% \,\, error \,\, in \,\,\\dot{\\mathbf{f}}$', fontsize=14)
     plt.tight_layout()
     # save plot and close
     print('\n\t'+'saving final image...', end='')
@@ -2206,7 +2810,7 @@ def main():
                                 optimize_omegas=False)
                             
     # interpolate the harmonic-balance solution using the prescribed frequencies
-    t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
+    t_HB_int, f_HB_int, dummy = trig_interp_given_freqs(t_HB, f_HB, omegas)
     
     ###############################################################################
     # recursive aliasing check. starting with a guess of the largest frequency in 
@@ -2322,7 +2926,7 @@ def main():
     # using these omegas as initial guesses, solve an HB problem while optimizing
     # the angular frequencies using time-accurate comparisons and gradient descent
     # N.B. when optimizing frequencies, the function returns three variables
-    t_HB, f_HB, omegas = solve_HB_problem(omegas, time_discretization, the_ode, 
+    t_HB, f_HB = solve_HB_problem(omegas, time_discretization, the_ode, 
                                     delta_tau=0.01, 
                                     constant_init_guess=10.0, 
                                     residual_convergence_criteria=fully_converged,
@@ -2331,7 +2935,7 @@ def main():
                                     optimize_omegas=False)
         
     # interpolate the harmonic-balance solution using the prescribed frequencies
-    t_HB_int, f_HB_int, dummy = fourierInterp_given_freqs(t_HB, f_HB, omegas)
+    t_HB_int, f_HB_int, dummy = trig_interp_given_freqs(t_HB, f_HB, omegas)
     
     # compute the "long period" corresponding the final set of omegas
     T_HB_sol = period_given_freqs(omegas)
@@ -2514,19 +3118,19 @@ def main():
     print('\tdet(D_HB) =', np.linalg.det(D_HB),'\n')
     print('\tcond(D_HB) =', np.linalg.cond(D_HB),'\n')
     print('\trank(D_HB) = ',np.linalg.matrix_rank(D_HB),'\n')
-    E_inv = HB_expansion_matrix(omegas, time_discretization)
-    N_E_inv = [[0]*N for i in range(N)]
-    N_E_inv = np.zeros((N,N),dtype=np.complex_)
+    G = HB_expansion_matrix(omegas, time_discretization)
+    N_G = [[0]*N for i in range(N)]
+    N_G = np.zeros((N,N),dtype=np.complex_)
     for i in range(N):
         for j in range(N):
-            N_E_inv[i][j] = np.round(N*E_inv[i][j],2)
-    stringed_E_inv = []
+            N_G[i][j] = np.round(N*G[i][j],2)
+    stringed_G = []
     for i in range(N):
-        realed_row = [np.real_if_close(N_E_inv[i][j],1000) for j in range(N)]        
+        realed_row = [np.real_if_close(N_G[i][j],1000) for j in range(N)]        
         stringed_row = ''.join([char for char in str(realed_row) if char not in 'array()'])
-        stringed_E_inv.append(stringed_row)
-    print('\n\tE_inv = (1/'+str(N)+')'+str(stringed_E_inv)[2:-2].replace("', '",'\n\t'+' '*13).replace(', ','\t'))
-    print('\n\trank(E_inv) = ',np.linalg.matrix_rank(E_inv))
+        stringed_G.append(stringed_row)
+    print('\n\tG = (1/'+str(N)+')'+str(stringed_G)[2:-2].replace("', '",'\n\t'+' '*13).replace(', ','\t'))
+    print('\n\trank(G) = ',np.linalg.matrix_rank(G))
     
     # print both TA and HB average function values to the screen
     print('\n-comparing the average value of the time-accurate solution (over \n'

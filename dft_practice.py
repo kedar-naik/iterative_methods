@@ -118,7 +118,8 @@ def fourierInterp_given_freqs(x, y, omegas, x_int=False):
 def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False, 
            use_angular_frequencies=False, plot_spectrum=False, 
            plot_log_scale=False, refine_peaks=False, auto_open_plot=False,
-           verbose=True, title_suffix='', plot_suffix='', use_fft=False):
+           verbose=True, title_suffix='', plot_suffix='', use_fft=False,
+           new_x_lims=[], plot_together=True):
     '''
     takes in a discrete signal and corresponding time points as numpy arrays 
     and returns the s and F, which are the discrete frequency samples indexed
@@ -176,6 +177,9 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                                 instead of computing the DFT directly (if 
                                 possible, please try to use a number of sample 
                                 points that is a power of two, i.e. 2^x)
+    -new_x_lims:                user-specified x-axis limits for the spectrum
+    -plot_together:             say whether to plot the spectrum separately or
+                                side-by-side with the signal (True by default)
     Inputs:
         - t = time points of the discrete signal
         - f = signal values of the discrete signal
@@ -210,7 +214,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
                 F[m] += f[n]*np.exp(-2.0*np.pi*1j*m*n/N)
     # convert the DFT to powers
     powers = np.absolute(F)**2
-    # compute 2B (the bandwidth)
+    # compute B (the bandlimit) (2B is the bandwidth)
     B = N/(2.0*L)
     # calculate the Nyquist frequency (a.k.a. folding frequency)
     if use_angular_frequencies:
@@ -229,6 +233,7 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         s_half_positive = s[1:int((N+1)/2)]
         powers_half_positive = powers[1:int((N+1)/2)]
     # compute the total energy contained in the positive half of the spectrum
+    # (E = 1/N times the sum because of the discrete parseval identity)
     N_half = len(powers_half_positive)
     E_half_positive = (1/N_half)*sum(powers_half_positive)
     # zip together the frequencies and powers, then sort them in descending 
@@ -528,18 +533,33 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         print('\n'+'-'*75)
     # plot the spectrum    
     if plot_spectrum:
-        # plotting preliminaries
-        plot_name = 'the_DFT'
-        auto_open = auto_open_plot
-        plt.figure(plot_name,figsize=(12,5))
+        if plot_together:
+            # plotting preliminaries
+            plot_name = 'the_DFT'
+            auto_open = auto_open_plot
+            the_fontsize = 16
+            plt.figure(plot_name,figsize=(12,5))
+            # specify subplot for signal
+            plt.subplot(1,2,1)
+        else:
+            # plotting preliminaries
+            plot_name_signal = 'the_signal'
+            auto_open = auto_open_plot
+            the_fontsize = 18
+            plt.figure(plot_name_signal)
         # plot the signal
-        plt.subplot(1,2,1)
         plt.plot(t,f,'ko-',label='$f(t)$')
-        plt.xlabel('$t, [s]$', fontsize=16)
-        plt.ylabel('$f(t)$', fontsize=16)
+        plt.xlabel('$t, \\left[\,\\mathrm{s}\,\\right]$',fontsize=the_fontsize)
+        plt.ylabel('$f(t)$', fontsize=the_fontsize)
         plt.legend(loc='best',fontsize=12)
-        # plot the DFT
-        plt.subplot(1,2,2)
+        # plot the spectrum
+        if plot_together:
+            # specify subplot for spectrum
+            plt.subplot(1,2,2)
+        else:
+            # plotting preliminaries
+            plot_name_spectrum = 'the_spectrum'
+            plt.figure(plot_name_spectrum)        
         # set the y position from which the vertical lines start
         if powers_close_to_zero:
             vlines_bottom = 0.0
@@ -567,12 +587,12 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
         # plot the Nyquist frequency and add the appropriate axis labels
         if use_angular_frequencies:
             folding_label = '$\omega_{nyquist}$'
-            plt.xlabel('$\omega, [\\frac{rad}{s}]$', fontsize=16)
-            plt.ylabel('$|\mathcal{F}f(\omega)|^2$', fontsize=16)
+            plt.xlabel('$\omega, \\left[\,\\frac{\\mathrm{rad}}{\\mathrm{s}}\\right]$', fontsize=the_fontsize)
+            plt.ylabel('$|\mathcal{F}f(\omega)|^2$', fontsize=the_fontsize)
         else:
             folding_label = '$s_{nyquist}$'
-            plt.xlabel('$s, [Hz]$', fontsize=16)
-            plt.ylabel('$|\mathcal{F}f(s)|^2$', fontsize=16)
+            plt.xlabel('$s, \\left[\,\\mathrm{Hz}\,\\right]$', fontsize=the_fontsize)
+            plt.ylabel('$|\mathcal{F}f(s)|^2$', fontsize=the_fontsize)
         # if refining, plot the relevant quantities 
         if refine_peaks:
             # plot the bin boundaries
@@ -670,17 +690,40 @@ def my_dft(t, f, percent_energy_AC_peaks, shift_frequencies=False,
             plt.legend(loc='best',fontsize=12)
             # adjust the axes to fit the refined peaks
             plt.xlim(-1.5*max(positive_freqs), 1.5*max(positive_freqs))
+        # adjust the x limits, if desired
+        if not new_x_lims==[]:
+            plt.xlim(new_x_lims)
         # use "tight layout"
         plt.tight_layout()
-        # save plot and close
-        print('\n\t'+'saving final image...', end='')
-        file_name = plot_name+plot_suffix+'.png'
-        plt.savefig(file_name, dpi=300)
-        print('figure saved: '+plot_name)
-        plt.close(plot_name)
-        # open the saved image, if desired
-        if auto_open:
-            webbrowser.open(file_name)
+        if plot_together:            
+            # save plot and close
+            print('\n\t'+'saving final image...', end='')
+            file_name = plot_name+plot_suffix+'.png'
+            plt.savefig(file_name, dpi=300)
+            print('figure saved: '+plot_name)
+            plt.close(plot_name)
+            # open the saved image, if desired
+            if auto_open:
+                webbrowser.open(file_name)
+        else:
+            # save signal plot and close
+            plt.figure(plot_name_signal)
+            print('\n\t'+'saving final image...', end='')
+            file_name_signal = plot_name_signal+plot_suffix+'.png'
+            plt.savefig(file_name_signal, dpi=300)
+            print('figure saved: '+plot_name_signal)
+            plt.close(plot_name_signal)
+            # save spectrum plot and close
+            plt.figure(plot_name_spectrum)
+            print('\n\t'+'saving final image...', end='')
+            file_name_spectrum = plot_name_spectrum+plot_suffix+'.png'
+            plt.savefig(file_name_spectrum, dpi=300)
+            print('figure saved: '+plot_name_spectrum)
+            plt.close(plot_name_spectrum)
+            # open the saved images, if desired
+            if auto_open:
+                webbrowser.open(file_name_signal)
+                webbrowser.open(file_name_spectrum)
     # return the peaks
     return freqs, F, powers, refined_positive_freqs, peak_bounds_tuples
 #-----------------------------------------------------------------------------#    

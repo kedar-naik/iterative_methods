@@ -323,7 +323,7 @@ def my_gaussian_elimination(A, partial_pivoting=True):
                      '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
     # initialize the lower- and upper-triangular matrices (L=I, U=A)
     L = np.eye(m, dtype=A_type)
-    U = A
+    U = np.copy(A)
     if partial_pivoting:
         P = np.eye(m, dtype=A_type)
     # run across the k columns
@@ -372,7 +372,7 @@ def my_back_substitution(U,b):
                      '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
                      '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
     # initialize the solution array
-    x = np.zeros((m,1))
+    x = np.zeros((m,1), dtype=np.complex_)
     # start back substitution
     for i in range(m-1,-1,-1):
         x[i] = b[i]
@@ -397,7 +397,7 @@ def my_forward_substitution(L,b):
                      '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
                      '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
     # initialize the solution array
-    y = np.zeros((m,1))
+    y = np.zeros((m,1), dtype=np.complex_)
     # start the forward solve
     for i in range(m):
         y[i] = b[i]
@@ -453,6 +453,13 @@ def my_inv(A):
                      'HAVE AN INVERSE!' +\
                      '\n\t\t\tNo. of ROWS: \t\t m = '+str(m)+'\n' + \
                      '\t\t\tNo. of COLUMNS: \t n = '+str(n)+'\n'
+    # check to make sure it has full rank
+    rank_A = np.linalg.matrix_rank(A)
+    #print('rank_A =', rank_A)
+    if not rank_A == n:
+        raise ValueError('\n\tSORRY...CAN\'T INVERT A SINGULAR MATRIX WITH GAUSS ' + \
+              'ELIMINATION. TRY USING A PSEUDOINVERSE THAT HAS BEEN ' + \
+              'DEFINED BY A THRESHOLDED SVD.\n')        
     # find the correct identity matrix
     I_m = np.eye(m)
     # solve for the solution of Ax=I
@@ -460,43 +467,240 @@ def my_inv(A):
     # return the inverse of A
     return A_inv
 #-----------------------------------------------------------------------------#
-def my_pinv(A):
+def my_pinv(A, approximate_using_svd=False):
     '''
-    this subroutine returns A+, the pseudoinverse of A, where we compute A+ 
+    this subroutine returns A+, the pseudoinverse of A (an m-by-n matrix).
+     
     using the SVD: A = USV* --> A+ = VS+U*, where S+ is a the transpose of the 
-    matrix where the nonzero elements of S are replaced by their reciprocals.
+    S matrix where the nonzero elements of S are replaced by their reciprocals.
+    
+    now, computing the SVD isn't cheap. if A happens to have full rank, you CAN 
+    use the SVD to compute the pseudoinverse, but you can also just use the 
+    Moore-Penrose pseudoinverse: A+ = inv(A*A)A*, which is identical.
+    
+    note that the Moore-Penrose formula can only be used when A has linearly
+    independent columns, i.e. when A has full rank (which is possible without
+    A being square). why? because unless you have independent columns, the 
+    Gram matrix A*A (which is always square) doesn't have full rank and, 
+    therefore, isn't invertible. and if you can't compute inv(A*A), then you 
+    can't compute inv(A*A)A* either.
+    
+    Again, when you have a SQUARE A with full rank (i.e. when A is invertible), 
+    A+ = inv(A). the SVD method will give you EXACTLY the same result as the 
+    Moore-Penrose formula (as it does whenever you have full rank) but, because
+    A is square, this result will actually be the true inverse of A. that is: 
+    
+       A+ = VS+U* = inv(A*A)A* = inv(A),  when A has full rank and is square.
+    
+    in the case where A does not have full rank, the Moore-Penrose formula is
+    useless. but, we can still approximate A+ using an approximate version of
+    the SVD approach. note that when A does not have full rank, there will not
+    be a full set of nonzero singular values in the S matrix. since you can't 
+    take the reciprocal of zero, a pseudoinverse cannot be defined. BUT, the
+    pseudoinverse can be approximated by replacing S with S~, where S~ is the
+    same as S except that near-zero singular have been replaced by zero. then,
+    S~+ amounts to taking the reciprocals of only those singular values that
+    have not been zeroed out -- no more division by zero! then, the approximate
+    psuedoinverse, A~+, is given by A~+ = VS~+U*
+
+    what counts as "near-zero"? here, i am using the same threshold used by the
+    pinv() routines in MATLAB, Octave, and Numpy: t = eps*max(m,n)*s_11, where 
+    eps is machine epsilon (the upper bound on relative error due to 
+    floating-point rounding) and s_11 is the largest singular value (which
+    should, conventionally, be in the first position along the diagonal of the
+    S -- or S~ -- matrix).
+    
+    to avoid confusion, this function makes the user specify when to return 
+    this approximate pseudoinverse by setting the argument 
+    approximate_using_svd=True. in other words, it requires the user to
+    know if the matrix A has full rank. 
+    
+    by default, the function assumes the matrix has full rank and uses the 
+    Moore-Penrose formula to compute A+. if the user supplies a rank-deficient 
+    matrix and fails to set the approximate_using_svd to True, an error will be 
+    thrown as soon as the my_inv() function is invoked to invert A*A.
+    
+    i could have just used the the SVD in both cases here, but i am purposely
+    trying to distinguish between the two methods and highlight the importance
+    of rank in computing A+ or A~+.
+    
+    if you really really want to use the SVD to compute the A+ for a full-rank
+    matrix, then you still can. just turn on the approximate_using_svd flag and
+    know that what you get will not be an approximate pseudoinverse, but rather
+    the true pseudoinverse, identical to the one given by Moore-Penrose.
     '''
     import numpy as np
-    # compute the SVD
-    U,s,V_star = np.linalg.svd(A)
-    # machine zero
-    machine_zero = np.finfo(float).eps
-    # our threshold for what counts as zero
-    threshold = machine_zero*1e3
-    # take the reciprocal of values higher than the threshold
-    s_threshold_reciprocal = np.zeros(s.shape)
-    for i in range(len(s)):
-        if s[i] > threshold:
-            s_threshold_reciprocal[i] = 1.0/s[i]
-    # form S+ (put thresholded values into a diagonal matrix and transpose it)
-    S_plus = np.transpose(np.diag(s_threshold_reciprocal))
-    # compute the adjoint of U
-    U_star = np.conjugate(np.transpose(U))
-    # undo the adjoint of V
-    V = np.conjugate(np.transpose(V_star))
-    # compute the pseudoinverse
-    A_plus = np.dot(np.dot(V,S_plus),U_star)
-    '''
-    # this method of finding the pseudoinverse, where A+ = inv(A*A)A*, only 
-    # works when A is of full rank
-    # compute the adjoint of A
-    A_star = np.conjugate(np.transpose(A))
-    # compute the pseudoinverse
-    A_plus = np.dot(my_inv(np.dot(A_star,A)),A_star)
-    '''
-    # return the pseudoinverse
+    
+    if approximate_using_svd: 
+        # compute the truncated SVD
+        U,s_truncated,V_star = my_truncated_svd(A)
+        # form S+ by taking the reciprocal all positive singular values and 
+        # placing them on the diagonal of a zero matrix shaped like A transpose
+        S_plus_truncated = np.zeros_like(np.transpose(A))
+        for i in range(len(s_truncated)):
+            if s_truncated[i] > 0.0:
+                S_plus_truncated[i][i] = 1.0/s_truncated[i]
+        # compute the adjoint of U
+        U_star = np.conjugate(np.transpose(U))
+        # undo the adjoint of V
+        V = np.conjugate(np.transpose(V_star))
+        # compute the (approximate) pseudoinverse
+        A_plus = np.dot(np.dot(V,S_plus_truncated),U_star)
+        
+    else:
+        # use the Moore-Penrose formulae.
+        #
+        # from linear algebra (strang pp. 107-8): let A be an m-by-n matrix. 
+        # obviously, A cannot have more than m linearly independent rows and
+        # cannot have more than n linearly independent columns.
+        #
+        # - full row rank:
+        #   when rank(A)=m and m<=n (square or more columns than rows), there 
+        #   exists an infinite number of n-by-m right inverses C (such that 
+        #   AC=eye(m)). so, Ax=b always has at least one solution 
+        #   (x=Cb: Ax=b --> ACb=b --> Ib=b). the minimum-norm solution is 
+        #   recovered by the right Moore-Penrose pseudoinverse C=A*inv(AA*)
+        #        
+        # - full column rank:
+        #   when rank(A)=n and m>=n (square or more rows than columns), there
+        #   is either one solution to Ax=b (if b happens to be in the column 
+        #   space to begin with) or no solution (which is when we need to look
+        #   for the least-squares solution, which is an orthogonal projection
+        #   of b onto the column space of A). since we have full column rank, 
+        #   the columns are linearly independent. that means A has an n-by-m
+        #   left inverse B (such that BA=eye(n)) and the single solution, if
+        #   it exists, is given by x=Bb. it probably doesn't exist, so we have 
+        #   to settle for a least-squares solution. in either case -- the exact
+        #   solution or the least-squares solution -- is given by the minimum-
+        #   norm solution, which is recovered by the left Moore-Penrose 
+        #   pseudoinverse B=inv(A*A)
+        
+        # get the dimensions of A
+        (m,n) = np.shape(A)
+        # check to see if A has full rank
+        A_has_full_rank = my_rank(A)==min(m,n)
+        # compute the appropriate pseudoinverse accordingly
+        if A_has_full_rank:
+            # compute the adjoint of A
+            A_star = np.conjugate(np.transpose(A))            
+            # if the matrix has full rank and is square (m=n), then it's
+            # invertible. either pseudoinverse formula will return the true
+            # inverse, inv(A). here, we'll use the left pseudoinverse formula,
+            # i.e. we'll lump the square case in with the case where there are
+            # more rows than columns.
+            if m >= n:
+                # compute the left Moore-Penrose pseudoinverse
+                
+                (m,n) = np.shape(np.dot(A_star,A))
+                A_star_A_is_square = m==n
+                A_star_A_has_full_rank = my_rank(np.dot(A_star,A))==min(m,n)
+                
+                #print('my_rank(np.dot(A_star,A)) =', my_rank(np.dot(A_star,A)))
+                #if A_star_A_is_square and A_star_A_has_full_rank: print('\nA*A invertible!')
+                
+                
+                A_plus = np.dot(my_inv(np.dot(A_star,A)),A_star)
+            else:
+                # compute the right Moore-Penrose pseudoinverse
+                A_plus = np.dot(A_star,my_inv(np.dot(A,A_star)))
+        else:
+            # if you don't have full rank, need to approximate the 
+            # pseudoinverse by using a thresholded SVD
+            raise ValueError('\n\tTHE MATRIX DOES NOT HAVE FULL RANK.' + \
+                             '\n\t CAN\'T USE MOORE-PENROSE FORMULAS.' + \
+                             '\n\tCOMPUTE AN APPROXIMATE PSEUDOINVERSE' + \
+                             '\n\tBY USING A TRUNCATED SVD.\n')
+    
+    # return the pseudoinverse (or approximate pseudoinverse)
     return A_plus
     
 #-----------------------------------------------------------------------------#
+def my_rank(A):
+    '''
+    returns the matrix rank of a given m-by-n matrix A. 
+    methodology: take the SVD. zero-out singular values that fall below a
+    certain threshold. count up the number of nonzero singular values.
+    '''
+    # compute the truncated SVD
+    U,s_truncated,V_star = my_truncated_svd(A)
+    # run through the s vector, counting up the nonzero singular values
+    r = 0
+    for s_value in s_truncated:
+        if s_value > 0.0:
+            r += 1
+    # return the "numerical rank" value
+    return r
+#-----------------------------------------------------------------------------#
+def my_truncated_svd(A):
+    '''
+    let A be any m-by-n matrix. this function
+    computes and returns an approximate SVD, where "near-zero" singular values
+    are zeroed out. if a singular value falls below some set threshold, then it
+    is considered to be "near-zero." what's the threshold? MATLAB, Octave, and
+    NumPy use t=eps*max(m,n)*s_11, where eps is machine epsilon a.k.a. unit
+    roundoff (the smallest representable positive number such that 
+    1.0 + eps != 1.0 or, to say it another way, it's the maximum error that can
+    occur ) and s_11 is the 
+    largest singular value. Golub & Van Loan (pp. 276) propose using either
+    t=eps*||A||_inf OR t=(1x10^-p)*||A||_inf, where p, an integer, is the 
+    number of decimal digits of precision to which the data used to build up A 
+    have -- if you're not working with experimental data, then p is machine
+    precision -- and where the infinity norm of an m-by-n matrix A is given by 
+    maximum row sum of A (Trefethen and Bau pp. 21). here, we'll use the 
+    following, tailor-made threshold, which is a blend of the two ideas above: 
+    t=(1x10^-p)*max(m,n)*s_11. 
+    from Numerical Recipes: t=s_11*(eps/2)*sqrt(m+n+1)
+    (see: https://docs.scipy.org/doc/numpy-dev/reference/generated/numpy.linalg.matrix_rank.html)
+    note:   
+        np.finfo(float).precision = the number of decimal digits to which a 
+                                    float is precise
+        np.finfo(float).resolution = the decimal resolution of a float, namely:
+                                    1x10^-precision, 
+    '''
+    import numpy as np
+    # select a threshold to use ('standard', 'golub', 'blend')
+    threshold_type = 'standard'
+    #threshold_type = 'golub'
+    threshold_type = 'recipes'
+    threshold_type = 'blend'
+    # compute the SVD
+    U,s,V_star = np.linalg.svd(A)
+    # machine epsilon (the smallest representable positive number such that 
+    # 1.0 + eps != 1.0)
+    machine_epsilon = np.finfo(A.dtype).eps
+    # machine precision (number of decimal digits to which a float is precise)
+    machine_precision = np.finfo(A.dtype).precision
+    # compute the infinity norm of A (which is just the largest row sum)
+    norm_inf_A = np.real(max(np.sum(A,axis=1)))
+    # recover the number of rows and columns in A
+    m,n = np.shape(A)
+    # extract the largest singular value
+    s_11 = s[0] 
+    # set the desired threshold
+    if threshold_type == 'standard':
+        threshold = machine_epsilon*max(m,n)*s_11
+    if threshold_type == 'golub':
+        threshold = machine_epsilon*norm_inf_A
+    if threshold_type == 'recipes':
+        threshold = s_11*(machine_epsilon/2.0)*np.sqrt(m+n+1)
+    if threshold_type == 'blend':
+        threshold = (10**-machine_precision)*max(m,n)*s_11
+    # zero out singular values that fall below the threshold
+    s_truncated = np.copy(s)
+    for i in range(len(s)):
+        if s[i] < threshold:
+            s_truncated[i] = 0.0
     
+    
+    #print('s =', s)
+    #print('standard threshold =', machine_epsilon*max(m,n)*s_11)
+    #print('golub threshold =', (10**-machine_precision)*norm_inf_A)
+    #print('recipes threshold =', s_11*(machine_epsilon/2.0)*np.sqrt(m+n+1))
+    #print('blend threshold =', (10**-machine_precision)*max(m,n)*s_11)
+    #print('s_truncated =', s_truncated)
+    
+    # return the truncated version of the SVD
+    return U,s_truncated,V_star
+#-----------------------------------------------------------------------------#
+
     
